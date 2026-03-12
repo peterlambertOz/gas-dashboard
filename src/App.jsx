@@ -9,6 +9,7 @@ import TabProduction from './tabs/TabProduction';
 import TabStateBreakdown from './tabs/TabStateBreakdown';
 import TabFlowMap from './tabs/TabFlowMap';
 import TabLNG from './tabs/TabLNG';
+import TabGasPrice from './tabs/TabGasPrice';
 
 const TABS = [
   { id: 'demand',     label: 'Daily Demand' },
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'states',     label: 'State Breakdown' },
   { id: 'flowmap',    label: 'Flow Map' },
   { id: 'lng',        label: 'LNG' },
+  { id: 'prices',     label: 'Gas Prices' },
 ];
 
 const YEAR_COLORS = {
@@ -167,7 +169,7 @@ export default function App() {
     if (records.length) exportToExcel(records.filter(r => selectedYears.includes(r.year)));
   };
 
-  const ActiveTab = { demand: TabDailyDemand, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG }[activeTab];
+  const ActiveTab = { demand: TabDailyDemand, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
 
   const btnBase = (color, active) => ({
     padding: '4px 13px', borderRadius: 5,

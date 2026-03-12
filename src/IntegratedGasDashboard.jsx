@@ -19,6 +19,8 @@ import {
   ComposedChart, Area, ReferenceArea,
   ScatterChart, Scatter, ZAxis, Cell
 } from "recharts";
+import TabLNG from "./tabs/TabLNG";
+import TabGasPrice from "./tabs/TabGasPrice";
 
 // ── Shared colour palette (compatible with CSS vars used in AEMO tabs) ──────────
 const C = {
@@ -4153,6 +4155,8 @@ const ALL_TABS = [
   { id: "storage",      label: "Storage (Iona)",         group: "aemo" },
   { id: "states",       label: "State Breakdown",        group: "aemo" },
   { id: "flowmap",      label: "Flow Map",               group: "aemo" },
+  { id: "lng",          label: "LNG",                    group: "aemo" },
+  { id: "prices",       label: "Gas Prices",             group: "aemo" },
 ];
 
 export default function IntegratedGasDashboard() {
@@ -4650,6 +4654,8 @@ export default function IntegratedGasDashboard() {
                 {activeTab === "storage"   && <TabStorage     records={records} selectedYears={selectedYears} dateRange={dateRange} stats={stats}/>}
                 {activeTab === "states"    && <TabStateBreakdown records={records} selectedYears={selectedYears} dateRange={dateRange} stats={stats}/>}
                 {activeTab === "flowmap"   && <TabFlowMap     records={records} selectedYears={selectedYears} dateRange={dateRange} stats={stats}/>}
+                {activeTab === "lng"       && <TabLNG         records={records} selectedYears={selectedYears} dateRange={dateRange} stats={stats}/>}
+                {activeTab === "prices"    && <TabGasPrice    selectedYears={selectedYears}/>}
               </>
             ))}
           </>
