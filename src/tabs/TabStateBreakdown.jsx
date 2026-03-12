@@ -3,7 +3,7 @@ import {
   Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts';
 import { useMemo, useState } from 'react';
-import { ChartCard, KpiCard, CustomTooltip, AXIS_STYLE, GRID_STYLE, YEAR_COLORS, Legend } from '../components/ChartCard';
+import { ChartCard, KpiCard, CustomTooltip, AXIS_STYLE, GRID_STYLE, YEAR_COLORS, Legend, fmtDate } from '../components/ChartCard';
 import { exportToPowerPoint, exportToExcel } from '../utils/exportUtils';
 
 const STATE_COLORS = {

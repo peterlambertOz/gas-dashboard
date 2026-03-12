@@ -43,15 +43,31 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
 
   // (monthlyProduction removed — placeholder for future monthly heatmap chart)
 
-  // Production breakdown latest year
+  // Production breakdown latest year — total incl QLD
   const latestProdBreakdown = useMemo(() =>
     records.filter(r => r.year === latestYear && r.date >= dateRange[0] && r.date <= dateRange[1])
       .map(r => ({
         date: r.date.substring(5),
-        longford: r.production_longford,
-        moomba: r.production_moomba,
-        swqp: r.production_swqp,
-        other: r.production_other,
+        longford:      r.production_longford,
+        moomba:        r.production_moomba,
+        qld_roma:      r.production_qld_roma       || 0,
+        qld_aplng:     r.production_qld_surat_aplng || 0,
+        qld_glng:      r.production_qld_surat_glng  || 0,
+        qld_other:     r.production_qld_other       || 0,
+        other:         r.production_other_south,
+      }))
+  , [records, latestYear, dateRange]);
+
+  // SE-only production breakdown
+  const seBreakdown = useMemo(() =>
+    records.filter(r => r.year === latestYear && r.date >= dateRange[0] && r.date <= dateRange[1])
+      .map(r => ({
+        date: r.date.substring(5),
+        longford:   r.production_longford,
+        moomba:     r.production_moomba,
+        se_otway:   r.production_se_otway    || 0,
+        se_gipps:   r.production_se_gippsland || 0,
+        se_other:   r.production_se_other    || 0,
       }))
   , [records, latestYear, dateRange]);
 
@@ -99,11 +115,41 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
         <Legend items={selectedYears.map(y => ({ color: YEAR_COLORS[y] || '#888', label: String(y) }))} />
       </ChartCard>
 
-      {/* Production source breakdown */}
+      {/* SE Production breakdown */}
+      <ChartCard
+        id="chart-prod-se"
+        title={`${latestYear} SE Production by Source`}
+        subtitle="Stacked daily SE production: Longford (Gippsland Basin) / Moomba (Cooper Basin) / Otway Basin / Gippsland Other / Other SE (TJ/day)"
+        onExportPPT={() => handleExportPPT('chart-prod-se', `${latestYear} SE Production by Source`)}
+        onExportXLSX={() => exportToExcel(records.filter(r => r.year === latestYear))}
+      >
+        <ResponsiveContainer width="100%" height={280}>
+          <ComposedChart data={seBreakdown} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
+            <CartesianGrid {...GRID_STYLE} />
+            <XAxis dataKey="date" {...AXIS_STYLE} tickFormatter={fmtDate} interval={Math.floor(seBreakdown.length / 12)} />
+            <YAxis {...AXIS_STYLE} tickFormatter={v => `${v.toLocaleString()}`} />
+            <Tooltip content={<CustomTooltip formatter={(v) => `${Math.round(v).toLocaleString()} TJ`} labelFormatter={fmtDate} />} />
+            <Area type="monotone" dataKey="longford"  stackId="1" name="Longford (Gippsland Basin)"   fill={CHART_COLORS.longford} stroke={CHART_COLORS.longford} fillOpacity={0.85} />
+            <Area type="monotone" dataKey="moomba"    stackId="1" name="Moomba (Cooper Basin, SE)"     fill={CHART_COLORS.moomba}   stroke={CHART_COLORS.moomba}   fillOpacity={0.85} />
+            <Area type="monotone" dataKey="se_otway"  stackId="1" name="Otway Basin (Otway, ATHENA)"   fill="#34d399"               stroke="#34d399"               fillOpacity={0.85} />
+            <Area type="monotone" dataKey="se_gipps"  stackId="1" name="Gippsland Other (Orbost, Lang Lang)" fill="#a78bfa"         stroke="#a78bfa"               fillOpacity={0.85} />
+            <Area type="monotone" dataKey="se_other"  stackId="1" name="Other SE"                      fill="#484f58"               stroke="#484f58"               fillOpacity={0.85} />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <Legend items={[
+          { color: CHART_COLORS.longford, label: 'Longford — Gippsland Basin (Bass Strait)' },
+          { color: CHART_COLORS.moomba,   label: 'Moomba — Cooper Basin (SA/QLD border)' },
+          { color: '#34d399',             label: 'Otway Basin — Otway, ATHENA (Port Campbell area)' },
+          { color: '#a78bfa',             label: 'Gippsland Other — Orbost, Lang Lang' },
+          { color: '#484f58',             label: 'Other SE' },
+        ]} />
+      </ChartCard>
+
+      {/* Production source breakdown — total incl QLD */}
       <ChartCard
         id="chart-prod-breakdown"
-        title={`${latestYear} Production by Source`}
-        subtitle="Stacked daily production: Longford / Moomba / SWQP / Other (TJ/day)"
+        title={`${latestYear} Total Production by Source (incl. QLD)`}
+        subtitle="Stacked daily production: SE sources + QLD CSG sub-groups (TJ/day)"
         onExportPPT={() => handleExportPPT('chart-prod-breakdown', `${latestYear} Production by Source`)}
         onExportXLSX={() => exportToExcel(records.filter(r => r.year === latestYear))}
       >
@@ -112,18 +158,24 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
             <CartesianGrid {...GRID_STYLE} />
             <XAxis dataKey="date" {...AXIS_STYLE} tickFormatter={fmtDate} interval={Math.floor(latestProdBreakdown.length / 12)} />
             <YAxis {...AXIS_STYLE} tickFormatter={v => `${v.toLocaleString()}`} />
-            <Tooltip content={<CustomTooltip formatter={(v) => `${Math.round(v).toLocaleString()} TJ`}  labelFormatter={fmtDate} /> } />
-            <Area type="monotone" dataKey="longford" stackId="1" name="Longford" fill={CHART_COLORS.longford} stroke={CHART_COLORS.longford} fillOpacity={0.85} />
-            <Area type="monotone" dataKey="moomba" stackId="1" name="Moomba & Other" fill={CHART_COLORS.moomba} stroke={CHART_COLORS.moomba} fillOpacity={0.85} />
-            <Area type="monotone" dataKey="swqp" stackId="1" name="SWQP" fill={CHART_COLORS.swqp} stroke={CHART_COLORS.swqp} fillOpacity={0.85} />
-            <Area type="monotone" dataKey="other" stackId="1" name="Other" fill="#484f58" stroke="#484f58" fillOpacity={0.85} />
+            <Tooltip content={<CustomTooltip formatter={(v) => `${Math.round(v).toLocaleString()} TJ`} labelFormatter={fmtDate} />} />
+            <Area type="monotone" dataKey="longford"  stackId="1" name="Longford (Gippsland)"          fill={CHART_COLORS.longford} stroke={CHART_COLORS.longford} fillOpacity={0.85} />
+            <Area type="monotone" dataKey="moomba"    stackId="1" name="Moomba (Cooper Basin)"          fill={CHART_COLORS.moomba}   stroke={CHART_COLORS.moomba}   fillOpacity={0.85} />
+            <Area type="monotone" dataKey="other"     stackId="1" name="Other SE (Otway/Gippsland)"     fill="#34d399"               stroke="#34d399"               fillOpacity={0.85} />
+            <Area type="monotone" dataKey="qld_roma"  stackId="1" name="QLD — Roma/Wallumbilla area"    fill="#f59e0b"               stroke="#f59e0b"               fillOpacity={0.85} />
+            <Area type="monotone" dataKey="qld_aplng" stackId="1" name="QLD — APLNG Surat Basin"        fill={CHART_COLORS.swqp}     stroke={CHART_COLORS.swqp}     fillOpacity={0.85} />
+            <Area type="monotone" dataKey="qld_glng"  stackId="1" name="QLD — GLNG/Santos Surat Basin"  fill="#fb7185"               stroke="#fb7185"               fillOpacity={0.75} />
+            <Area type="monotone" dataKey="qld_other" stackId="1" name="QLD — Other"                    fill="#484f58"               stroke="#484f58"               fillOpacity={0.85} />
           </ComposedChart>
         </ResponsiveContainer>
         <Legend items={[
-          { color: CHART_COLORS.longford, label: 'Longford' },
-          { color: CHART_COLORS.moomba, label: 'Moomba & Other South' },
-          { color: CHART_COLORS.swqp, label: 'SWQP (QLD)' },
-          { color: '#484f58', label: 'Other' },
+          { color: CHART_COLORS.longford, label: 'Longford — Gippsland Basin' },
+          { color: CHART_COLORS.moomba,   label: 'Moomba — Cooper Basin (SE)' },
+          { color: '#34d399',             label: 'Other SE — Otway / Gippsland satellites' },
+          { color: '#f59e0b',             label: 'QLD — Roma / Wallumbilla area (Ruby Jo, Combabula, Jordan, Roma)' },
+          { color: CHART_COLORS.swqp,     label: 'QLD — APLNG Surat Basin (Condabri, Orana, Woleebee Creek etc.)' },
+          { color: '#fb7185',             label: 'QLD — GLNG / Santos Surat Basin (Fairview, Kenya, Scotia etc.)' },
+          { color: '#484f58',             label: 'QLD — Other' },
         ]} />
       </ChartCard>
 

@@ -92,7 +92,16 @@ function aggregateRows(rows) {
         production_longford: 0,
         production_moomba: 0,
         production_other_south: 0,  // Minerva, Otway, Athena, Camden, Lang Lang, Orbost
+        // SE sub-groups
+        production_se_otway: 0,     // Otway Basin: Otway, Minerva/ATHENA (via Iona)
+        production_se_gippsland: 0, // Gippsland Basin non-Longford: Orbost, Lang Lang
+        production_se_other: 0,     // Camden, Bass Strait other, any residual SE
         production_swqp: 0,
+        // QLD sub-groups (sum = production_swqp)
+        production_qld_surat_aplng: 0,   // APLNG Surat Basin: Condabri, Orana, Reedy Creek, Talinga, Daandine, Tipton, Woleebee Creek
+        production_qld_surat_glng: 0,    // GLNG Surat Basin: Fairview, Kenya, Scotia, Arcadia, Windibri, Strathblane, Spring Gully, Meridian, Yellowbank
+        production_qld_roma: 0,          // Roma/Wallumbilla area: Ruby Jo, Combabula, Jordan, Roma, Roma North, RMNGPF, Taloona
+        production_qld_other: 0,         // All other QLD (Rolleston, Kincora, Kogan North, Atlas, Bellevue, Peat, Eurombah Creek etc.)
         // Pipeline flow map fields
         map_msp_nsw: 0,     // MSP demand at NSW/ACT nodes (Moomba→Sydney)
         map_maps_sa: 0,     // MAPS demand at SA nodes (Moomba→Adelaide)
@@ -193,10 +202,27 @@ function aggregateRows(rows) {
       } else {
         // Lang Lang, Orbost, Minerva, Otway, Athena, Camden, etc.
         d.production_other_south += supply;
+        const OTWAY_BASIN    = new Set(['Otway','ATHENA','Minerva']);
+        const GIPPSLAND_OTHR = new Set(['Orbost','Lang Lang']);
+        if (OTWAY_BASIN.has(name))        d.production_se_otway      += supply;
+        else if (GIPPSLAND_OTHR.has(name)) d.production_se_gippsland += supply;
+        else                               d.production_se_other      += supply;
       }
 
     } else if (ft === 'PROD' && state === 'QLD') {
       d.production_swqp += supply;
+      // Sub-group classification
+      const APLNG_SURAT = new Set(['Condabri North','Condabri South','Condabri Central','Orana',
+        'Reedy Creek','Talinga','Daandine','Tipton','Woleebee Creek','Bellevue','Eurombah Creek','Atlas',
+        'Atlas East Central Processing Facility']);
+      const GLNG_SURAT  = new Set(['Fairview','Kenya','Scotia','Arcadia','Windibri','Strathblane',
+        'Spring Gully','Meridian','Yellowbank','Jordan']);
+      const ROMA_AREA   = new Set(['Ruby Jo','Combabula','Roma','Roma North','RMNGPF','Taloona',
+        'Kincora','Peat']);
+      if (APLNG_SURAT.has(name))      d.production_qld_surat_aplng += supply;
+      else if (GLNG_SURAT.has(name))  d.production_qld_surat_glng  += supply;
+      else if (ROMA_AREA.has(name))   d.production_qld_roma        += supply;
+      else                            d.production_qld_other       += supply;
 
     } else if (ft === 'PIPE' && name === 'SWQP') {
       // Net QLD↔SE flow measured at Moomba Hub: TransferOut - Supply

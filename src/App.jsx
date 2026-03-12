@@ -212,7 +212,7 @@ export default function App() {
 
         <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
           {lastFetch && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace' }}>
-            ↻ {lastFetch.toLocaleDateString()} {lastFetch.toLocaleTimeString()}
+            ↻ {lastFetch.toLocaleDateString('en-GB')} {lastFetch.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
           </span>}
           <button onClick={() => loadData(false)} disabled={loading} style={btnBase('#388bfd', false)}>
             {loading && !usingDemo ? (loadMsg || 'Loading...') : '↻ Fetch AEMO'}
