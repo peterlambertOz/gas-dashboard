@@ -152,7 +152,7 @@ const PIPES = [
 
   // ── EGP: Longford → (east of Canberra) → Sydney (coastal route) ──────────
   // EGP runs east of MSP/VNI — separate physical pipeline up the coast
-  { id:'egp',   label:'EGP',  field:'map_egp_nsw',  maxVal:280, labelFrac:0.4,
+  { id:'egp',   label:'EGP',  field:'map_egp_nsw',  maxVal:280, labelFrac:0.55, labelOffset:[10, 30],
     waypoints:[[148.8,-37.2],[149.5,-36.2],[150.2,-35.0],[150.7,-34.0],[151.0,-33.8]],
     from:'longford', to:'sydney' },
 
@@ -167,7 +167,7 @@ const PIPES = [
   // ── VTS spokes ────────────────────────────────────────────────────────────
   { id:'lmp',   label:'LMP',  field:'map_vts_vic',   maxVal:1200, labelFrac:0.4,
     waypoints:[[146.2,-37.9]], from:'longford', to:'vts_hub' },
-  { id:'swp',   label:'SWP',  field:'map_swp',       maxVal:400, labelFrac:0.4,
+  { id:'swp',   label:'SWP',  field:'map_swp',       maxVal:400, labelFrac:0.5,
     waypoints:[[143.8,-38.1],[144.5,-38.0]], from:'iona', to:'vts_hub' },
 
   // ── Otway Basin ───────────────────────────────────────────────────────────
@@ -313,14 +313,14 @@ const NODE_CFG = {
   wallumbilla:   { label:'Wallumbilla', sub:'QLD CSG hub', icon:'⛽', color:'#c084fc', r:17, field:'production_swqp' },
   moomba:        { label:'Moomba Hub',  sub:'Cooper Basin',icon:'⚙',  color:'#c084fc', r:19, field:'production_moomba' },
   longford:      { label:'Longford',    sub:'Gippsland',   icon:'⛽', color:'#c084fc', r:16, field:'production_longford' },
-  iona:          { label:'Iona UGS',    sub:'',            icon:'🏭', color:'#34d399', r:15, field:'storage_iona' },
+  iona:          { label:'Iona UGS',    sub:'',            icon:'🏭', color:'#34d399', r:15, field:'storage_iona', labelAbove:true },
   otway:         { label:'Otway',       sub:'Otway Basin', icon:'⛽', color:'#c084fc', r:11, field:'production_other_south' },
   ballera:       { label:'Ballera',     sub:null,          icon:null,  color:'#4a6a8a', r:5,  field:null },
   culcairn:      { label:'Culcairn',    sub:'MSP spur/VNI', icon:'◉',  color:'#a78bfa', r:8,  field:'map_vni', labelRight:true },
-  vts_hub:       { label:'VTS / Melbourne', sub:'VIC demand', icon:'🏙', color:'#38bdf8', r:22, field:'pipe_vic', vts:true },
-  curtis_island: { label:'Curtis Is.',  sub:'LNG terminal',icon:'🚢', color:'#f43f5e', r:15, field:null },
-  brisbane:      { label:'Brisbane',    sub:'QLD demand',  icon:'🏙', color:'#38bdf8', r:15, field:'map_rbp_bris' },
-  gladstone:     { label:'Gladstone',   sub:'QGP demand',  icon:'🏙', color:'#38bdf8', r:11, field:'map_qgp_qld'  },
+  vts_hub:       { label:'VTS / Melbourne', sub:'VIC demand', icon:'🏙', color:'#38bdf8', r:22, field:'pipe_vic', vts:true, labelAbove:true },
+  curtis_island: { label:'Curtis Is.',  sub:'LNG terminal',icon:'🚢', color:'#f43f5e', r:15, field:null, labelRight:true },
+  brisbane:      { label:'Brisbane',    sub:'QLD demand',  icon:'🏙', color:'#38bdf8', r:15, field:'map_rbp_bris', labelRight:true },
+  gladstone:     { label:'Gladstone',   sub:'QGP demand',  icon:'🏙', color:'#38bdf8', r:11, field:'map_qgp_qld', labelRight:true, labelLeader:true, labelRightOffset:18, labelDropY:28 },
   sydney:        { label:'Sydney',      sub:'NSW demand',  icon:'🏙', color:'#38bdf8', r:17, field:'pipe_nsw' },
   canberra:      { label:'Canberra',    sub:'ACT',         icon:'🏛', color:'#38bdf8', r:9,  field:null },
   adelaide:      { label:'Adelaide',    sub:'SA demand',   icon:'🏙', color:'#38bdf8', r:16, field:'pipe_sa' },
@@ -345,15 +345,25 @@ function MapNode({ id, rec }) {
   const showVal = val != null && !isNaN(val) && Math.abs(val) > 0.4;
 
   // Label positioning: avoid map edges & overlaps
-  const above = ['wallumbilla','moomba','ballera','curtis_island','gladstone','brisbane'].includes(id);
-  const left  = ['adelaide','iona','otway','moomba'].includes(id);
-  const right = ['sydney','longford','brisbane','curtis_island','vts_hub'].includes(id) || cfg.labelRight;
+  const above = ['wallumbilla','moomba','ballera','curtis_island'].includes(id) || cfg.labelAbove;
+  const below = cfg.labelBelow;
+  const left  = ['adelaide','otway','moomba'].includes(id) && !above;
+  const right = (['sydney','longford','brisbane','curtis_island'].includes(id) || cfg.labelRight) && !above;
+  const aboveRight = cfg.labelAboveRight && !above;
 
-  let lx = cx, ly = above ? cy - r - 14 : cy + r + 14, anchor = 'middle';
-  if (left)  { lx = cx - r - 5; ly = cy - 2; anchor = 'end'; }
-  if (right) { lx = cx + r + 5; ly = cy - 2; anchor = 'start'; }
+  // ly = node name text position; valY = TJ value position (above name for above-nodes)
+  let lx = cx, ly = above ? cy - r - 14 : below ? cy + r + 14 : cy + r + 14, anchor = 'middle';
+  if (left)       { lx = cx - r - 5; ly = cy - 2; anchor = 'end'; }
+  if (right)      { lx = cx + r + (cfg.labelRightOffset ?? 5); ly = cy + (cfg.labelDropY ?? -2); anchor = 'start'; }
+  if (aboveRight) { lx = cx + r + 5; ly = cy - r - 10; anchor = 'start'; }
 
-  const valY = above ? cy + r + 15 : left || right ? cy + 13 : ly + 13;
+  const valY = above      ? ly - 14
+             : aboveRight ? cy - r + 5
+             : left || right ? cy + (cfg.labelDropY ?? 0) + 11
+             : ly + 13;
+
+  // Leader line: thin dashed line from circle edge to label (e.g. Gladstone)
+  const leaderEnd = cfg.labelLeader ? { x: lx - 4, y: ly + 4 } : null;
 
   // VTS hub gets an extra outer zone ring
   const vtsRing = cfg.vts ? (
@@ -363,6 +373,10 @@ function MapNode({ id, rec }) {
 
   return (
     <g>
+      {leaderEnd && (
+        <line x1={cx + r} y1={cy} x2={leaderEnd.x} y2={leaderEnd.y}
+          stroke={nodeColor} strokeWidth={0.8} strokeDasharray="3 2" opacity={0.5} />
+      )}
       {vtsRing}
       <circle cx={cx} cy={cy} r={r + 6} fill={nodeColor} fillOpacity={0.12} />
       <circle cx={cx} cy={cy} r={r + 2} fill="none" stroke={nodeColor} strokeWidth={1.5} strokeOpacity={0.4} />
@@ -379,12 +393,12 @@ function MapNode({ id, rec }) {
         </text>
       )}
       {showVal && sub && (
-        <text x={lx} y={valY + 12} textAnchor={anchor} fill="#64748b" fontSize={8.5}
+        <text x={lx} y={above ? ly + 11 : valY + 12} textAnchor={anchor} fill="#64748b" fontSize={8.5}
           fontFamily="DM Mono, monospace"
           style={{ paintOrder:'stroke', stroke:'#0b1525', strokeWidth:2 }}>{sub}</text>
       )}
       {id === 'iona' && rec?.storage_balance_iona != null && (
-        <text x={lx} y={valY + 24} textAnchor={anchor} fill="#334155" fontSize={8.5}
+        <text x={lx} y={above ? ly + 22 : valY + 24} textAnchor={anchor} fill="#334155" fontSize={8.5}
           fontFamily="DM Mono, monospace"
           style={{ paintOrder:'stroke', stroke:'#0b1525', strokeWidth:2 }}>
           bal {Math.round(rec.storage_balance_iona).toLocaleString()} TJ
@@ -581,19 +595,27 @@ export default function TabFlowMap({ records }) {
       {/* Note */}
       <div style={{ background:'#071020', border:'1px solid #1e3a5a', borderLeft:'3px solid #e6a817',
         borderRadius:6, padding:'10px 14px', fontSize:11, color:'#94a3b8', lineHeight:1.8 }}>
-        <strong style={{ color:'#e2e8f0' }}>Pipeline key: </strong>
-        <strong style={{ color:'#e2e8f0' }}>SWQP</strong> = South West QLD Pipeline (Wallumbilla↔Moomba, bidirectional) ·
-        <strong style={{ color:'#e2e8f0' }}> MAPS</strong> = Moomba to Adelaide Pipeline System ·
-        <strong style={{ color:'#e2e8f0' }}> MSP</strong> = Moomba to Sydney Pipeline ·
-        <strong style={{ color:'#e2e8f0' }}> LMP</strong> = Longford to Melbourne Pipeline (VTS) ·
-        <strong style={{ color:'#e2e8f0' }}> EGP</strong> = Eastern Gas Pipeline (Longford→Sydney, coastal) ·
-        <strong style={{ color:'#e2e8f0' }}> VNI</strong> = Victorian-NSW Interconnect (Culcairn) ·
-        <strong style={{ color:'#e2e8f0' }}> PCA</strong> = Port Campbell to Adelaide · 
-        <strong style={{ color:'#e2e8f0' }}> SEA Gas</strong> = SEA Gas Pipeline (Iona→Adelaide) ·
-        <strong style={{ color:'#e2e8f0' }}> TGP</strong> = Tasmanian Gas Pipeline ·
-        <strong style={{ color:'#e2e8f0' }}> RBP</strong> = Roma-Brisbane Pipeline ·
-        <strong style={{ color:'#e2e8f0' }}> QGP</strong> = Queensland Gas Pipeline (→Gladstone) ·
-        <strong style={{ color:'#e2e8f0' }}> WGP/APLNG/GLNG</strong> = QLD LNG export pipelines to Curtis Island.
+        <strong style={{ color:'#e2e8f0' }}>Pipeline key</strong>
+        {' — flows measured at the upstream injection point unless noted:'}
+        <br />
+        <strong style={{ color:'#e2e8f0' }}>SWQP</strong> = South West Queensland Pipeline (bidirectional) — flow shown is net QLD→SE, measured at Moomba Hub ·
+        <strong style={{ color:'#e2e8f0' }}> MAPS</strong> = Moomba to Adelaide Pipeline System — measured at Moomba Hub ·
+        <strong style={{ color:'#e2e8f0' }}> MSP</strong> = Moomba to Sydney Pipeline — measured at Moomba Hub ·
+        <strong style={{ color:'#e2e8f0' }}> EGP</strong> = Eastern Gas Pipeline (Longford→Sydney, coastal route) — measured at Longford Hub ·
+        <strong style={{ color:'#e2e8f0' }}> VTS</strong> = Victorian Transmission System — measured at Longford Hub, Iona Hub and Culcairn ·
+        <strong style={{ color:'#e2e8f0' }}> VNI</strong> = Victorian–NSW Interconnect — measured at Culcairn ·
+        <strong style={{ color:'#e2e8f0' }}> PCA</strong> = Port Campbell to Adelaide (SEA Gas Pipeline, ~680 km) — measured at Iona Hub ·
+        <strong style={{ color:'#e2e8f0' }}> PCI</strong> = Port Campbell to Iona connector — measured at Iona Hub; bidirectional ·
+        <strong style={{ color:'#e2e8f0' }}> TGP</strong> = Tasmanian Gas Pipeline — measured at Longford Hub ·
+        <strong style={{ color:'#e2e8f0' }}> MPL</strong> = Minerva Pipeline (Otway→VIC regional) — measured at Iona Hub ·
+        <strong style={{ color:'#e2e8f0' }}> RBP</strong> = Roma–Brisbane Pipeline — measured at Brisbane ·
+        <strong style={{ color:'#e2e8f0' }}> QGP</strong> = Queensland Gas Pipeline — measured at Gladstone (Regional QLD) ·
+        <strong style={{ color:'#e2e8f0' }}> WGP/APLNG/GLNG</strong> = QLD LNG export pipelines — all measured at Curtis Island (gas delivered to LNG trains).
+        <br />
+        <span style={{ color:'#f59e0b' }}>⚠ Northern Trunkline (NSW) not in GBB dataset:</span>
+        {" Jemena's Northern Trunkline (Hunter Valley/Central Coast) is not separately reported. "}
+        {'Colongra Gas Storage, Kurri Kurri PS, Orica Kooragang Island, and Newcastle Gas Storage '}
+        {'all connect via this trunkline — their flows appear aggregated under Sydney/Regional NSW nodes.'}
       </div>
     </div>
   );
