@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 *.tar.gz 
+"*.zip" 
+"*.tar.gz" 
+"patch-*.cjs" 
