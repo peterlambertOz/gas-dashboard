@@ -84,7 +84,7 @@ export default function TabDailyDemand({ records, selectedYears, dateRange }) {
   // DOY → date label for YoY chart (FIX 5 analogous — applied here too)
   const dayLabel = (doy) => {
     const d = new Date(2024, 0, doy);
-    return `${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
+    return `${d.getDate()}-${MONTH_LABELS[d.getMonth()]}`;
   };
 
   const commitThreshold = () => {
@@ -144,7 +144,7 @@ export default function TabDailyDemand({ records, selectedYears, dateRange }) {
             <XAxis dataKey="day" tickFormatter={dayLabel}
               ticks={[1,32,60,91,121,152,182,213,244,274,305,335]} {...AXIS_STYLE} />
             <YAxis {...AXIS_STYLE} tickFormatter={v => Math.round(v).toLocaleString()} />
-            <Tooltip content={<CustomTooltip formatter={v => `${Math.round(v).toLocaleString()} TJ`}  labelFormatter={fmtDate} /> } />
+            <Tooltip content={<CustomTooltip formatter={v => `${Math.round(v).toLocaleString()} TJ`}  labelFormatter={dayLabel} /> } />
             {selectedYears.map(y => (
               <Line key={y} type="monotone" dataKey={String(y)} name={String(y)}
                 stroke={YEAR_COLORS[y] || '#888'} strokeWidth={y === latestYear ? 2.5 : 1.5}

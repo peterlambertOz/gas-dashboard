@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import * as XLSX from 'xlsx';
 import { fetchAEMOData, loadFromExcel, generateSampleData, computeStats } from './utils/aemoParser';
 import { exportToExcel, exportToPowerPoint } from './utils/exportUtils';
 import TabDailyDemand from './tabs/TabDailyDemand';
@@ -10,9 +11,11 @@ import TabStateBreakdown from './tabs/TabStateBreakdown';
 import TabFlowMap from './tabs/TabFlowMap';
 import TabLNG from './tabs/TabLNG';
 import TabGasPrice from './tabs/TabGasPrice';
+import TabForecast from './tabs/TabForecast';
 
 const TABS = [
   { id: 'demand',     label: 'Daily Demand' },
+  { id: 'forecast',   label: 'Forecast Demand' },
   { id: 'gpg',        label: 'GPG Analysis' },
   { id: 'supply',     label: 'Supply & Capacity' },
   { id: 'production', label: 'Production' },
@@ -48,6 +51,17 @@ export default function App() {
   const [error, setError] = useState('');
   const [usingDemo, setUsingDemo] = useState(false);
   const [activeTab, setActiveTab] = useState('demand');
+
+  // ── Forecast data state ────────────────────────────────────────────────────────
+  const [forecastData,    setForecastData]    = useState(null);  // parsed main CSV rows
+  const [forecastPoeData, setForecastPoeData] = useState(null);  // parsed POE CSV rows
+  const [forecastDate,    setForecastDate]    = useState(null);  // e.g. '20260313' from filename
+
+  // ── Price data state (STTM + DWGM) ──────────────────────────────────────────
+  const [sttmData,   setSttmData]   = useState({});
+  const [dwgmWb,     setDwgmWb]     = useState(null);
+  const [priceLoaded,setPriceLoaded]= useState({ sttm: false, dwgm: false });
+  const [priceError, setPriceError] = useState({ sttm: null,  dwgm: null  });
   const [selectedYears, setSelectedYears] = useState([2023, 2024, 2025]);
   const [dateRange, setDateRange] = useState(['2019-01-01', '2025-12-31']);
   const [stats, setStats] = useState({});
@@ -112,9 +126,100 @@ export default function App() {
   }, []);
 
 
-  const handleExcelUpload = useCallback(async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Route a single parsed file to the right state setter
+  const routeFile = useCallback(async (file) => {
+    const name = file.name.toLowerCase();
+
+    // Forecast POE CSV — must be checked before main forecast (more specific filename)
+    if (name.includes('gas_forecast_poe') && name.endsWith('.csv')) {
+      const text = await file.text();
+      const lines = text.trim().split(/\r?\n/).filter(Boolean);
+      const headers = lines[0].split(',').map(h => h.trim());
+      const poeMap = {};
+      lines.slice(1).forEach(l => {
+        const vals = l.split(',');
+        const raw = Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim() ?? '']));
+        if (!raw.date) return;
+        poeMap[raw.date] = {
+          p10_total:  parseFloat(raw.p10_total_tj)   || null,
+          p90_total:  parseFloat(raw.p90_total_tj)   || null,
+          p10_gpg:    parseFloat(raw.p10_gpg_tj)     || null,
+          p90_gpg:    parseFloat(raw.p90_gpg_tj)     || null,
+          p10_nonpwr: parseFloat(raw.p10_nonpwr_tj)  || null,
+          p90_nonpwr: parseFloat(raw.p90_nonpwr_tj)  || null,
+        };
+      });
+      setForecastPoeData(poeMap);
+      return;
+    }
+
+    // Forecast main CSV
+    if (name.includes('gas_forecast') && name.endsWith('.csv')) {
+      const dateMatch = name.match(/(\d{8})/);
+      if (dateMatch) setForecastDate(dateMatch[1]);
+      const text = await file.text();
+      const lines = text.trim().split(/\r?\n/).filter(Boolean);
+      const headers = lines[0].split(',').map(h => h.trim());
+      const rows = lines.slice(1).map(l => {
+        const vals = l.split(',');
+        const raw = Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim() ?? '']));
+        const gpg_tj = parseFloat(raw.pred_gpg_tj) || 0;
+        return {
+          date:       raw.date,
+          period:     raw.period,
+          pred_total: parseFloat(raw.pred_total_tj)          || 0,
+          pred_gpg:   gpg_tj,
+          pred_nonpwr:parseFloat(raw.pred_nonpower_tj)       || 0,
+          pred_vic:   parseFloat(raw.pred_vic_nonpower_tj)   || 0,
+          pred_nsw:   parseFloat(raw.pred_nsw_nonpower_tj)   || 0,
+          pred_sa:    parseFloat(raw.pred_sa_nonpower_tj)    || 0,
+          pred_tas:   parseFloat(raw.pred_tas_nonpower_tj)   || 0,
+          pred_nem:   parseFloat(raw.pred_nem_mwh)           || 0,
+          pred_wind:  parseFloat(raw.pred_wind_mwh)          || 0,
+          pred_solar: parseFloat(raw.pred_solar_mwh)         || 0,
+          pred_hydro: parseFloat(raw.pred_hydro_mwh)         || 0,
+          pred_coal:  parseFloat(raw.pred_coal_mwh)          || 0,
+          pred_gas_mwh: Math.round(gpg_tj * 1000 / 8.5),
+          // pass through actuals if present
+          actual_gpg_tj:        parseFloat(raw.actual_gpg_tj)         || null,
+          actual_nonpower_tj:   parseFloat(raw.actual_nonpower_tj)    || null,
+          actual_vic_nonpower_tj: parseFloat(raw.actual_vic_nonpower_tj) || null,
+          actual_nsw_nonpower_tj: parseFloat(raw.actual_nsw_nonpower_tj) || null,
+          actual_sa_nonpower_tj:  parseFloat(raw.actual_sa_nonpower_tj)  || null,
+          actual_tas_nonpower_tj: parseFloat(raw.actual_tas_nonpower_tj) || null,
+        };
+      });
+      setForecastData(rows);
+      return;
+    }
+
+    // For xlsx/xls: sniff by sheet names
+    const buf = await file.arrayBuffer();
+    const wb  = XLSX.read(buf, { type: 'array', cellDates: true });
+    const sheets = wb.SheetNames;
+
+    // STTM: has "SYD price and withdrawals"
+    if (sheets.some(s => s.includes('price and withdrawals'))) {
+      try {
+        const { parseSttm } = await import('./tabs/TabGasPrice.jsx');
+        setSttmData(parseSttm(wb));
+        setPriceLoaded(prev => ({ ...prev, sttm: true }));
+        setPriceError(prev => ({ ...prev, sttm: null }));
+      } catch (err) {
+        setPriceError(prev => ({ ...prev, sttm: err.message }));
+      }
+      return;
+    }
+
+    // DWGM: has "Prices" and "Demand" sheets
+    if (sheets.includes('Prices') && sheets.includes('Demand')) {
+      setDwgmWb(wb);
+      setPriceLoaded(prev => ({ ...prev, dwgm: true }));
+      setPriceError(prev => ({ ...prev, dwgm: null }));
+      return;
+    }
+
+    // Default: GBB Excel file
     setLoading(true);
     setError('');
     setLoadMsg('Reading Excel file...');
@@ -122,7 +227,6 @@ export default function App() {
       const data = await loadFromExcel(file, setLoadMsg);
       const fetchedAt = new Date();
       applyData(data, setRecords, setStats, setLastFetch, setSelectedYears, setDateRange, setUsingDemo, fetchedAt);
-      // Persist to cache
       try {
         setLoadMsg('Saving to local cache...');
         localStorage.setItem(CACHE_KEY, JSON.stringify(data));
@@ -130,14 +234,21 @@ export default function App() {
       } catch (cacheErr) {
         console.warn('Cache save failed:', cacheErr);
       }
-    } catch (e) {
-      setError('Excel load failed: ' + e.message);
+    } catch (err) {
+      setError('Excel load failed: ' + err.message);
     } finally {
       setLoading(false);
       setLoadMsg('');
-      e.target.value = '';
     }
-  }, []);
+  }, [setSttmData, setDwgmWb, setPriceLoaded, setPriceError, setForecastData, setForecastPoeData]);
+
+  const handleExcelUpload = useCallback(async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    for (const file of files) {
+      await routeFile(file);
+    }
+  }, [routeFile]);
 
   const toggleYear = (y) => {
     setSelectedYears(prev =>
@@ -169,7 +280,9 @@ export default function App() {
     if (records.length) exportToExcel(records.filter(r => selectedYears.includes(r.year)));
   };
 
-  const ActiveTab = { demand: TabDailyDemand, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
+  const ActiveTab = { demand: TabDailyDemand, forecast: TabForecast, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
+  const priceProps    = { sttmData, dwgmWb, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
+  const forecastProps = { forecastData, forecastPoeData, forecastDate };
 
   const btnBase = (color, active) => ({
     padding: '4px 13px', borderRadius: 5,
@@ -230,10 +343,11 @@ export default function App() {
             opacity: loading ? 0.5 : 1,
             display: 'inline-block',
           }}>
-            ↑ Load XLSX
+            ↑ Load data
             <input
               type="file"
               accept=".xlsx,.xls,.csv"
+              multiple
               onChange={handleExcelUpload}
               disabled={loading}
               style={{ display: 'none' }}
@@ -325,7 +439,32 @@ export default function App() {
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-muted)', fontSize: 12 }}>{loadMsg}</div>
           </div>
-        ) : records.length === 0 ? (
+        ) : activeTab === 'prices' && !priceLoaded.sttm && !priceLoaded.dwgm ? (
+          // ── Prices empty state ────────────────────────────────────────────────
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 400, gap: 20, textAlign: 'center' }}>
+            <div style={{ fontSize: 44 }}>💹</div>
+            <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20 }}>No price data loaded</div>
+            <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 8, padding: '16px 24px', maxWidth: 480, width: '100%', textAlign: 'left' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontFamily: 'DM Mono, monospace' }}>Available data files</div>
+              {[
+                { label: 'DWGM prices (Victorian gas market)', file: 'DWGM.XLSX' },
+                { label: 'STTM prices (Sydney, Adelaide, Brisbane)', file: 'STTM.XLSX' },
+              ].map(({ label, file }) => (
+                <div key={file} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #30363d' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
+                  <a href={`/data/${file}`} download style={{ fontSize: 12, fontFamily: 'DM Mono, monospace', color: '#39d0d8', textDecoration: 'none' }}>⬇ {file}</a>
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, fontFamily: 'DM Mono, monospace' }}>
+                Files updated periodically · use ↑ Load data to upload
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 400, lineHeight: 1.6 }}>
+              Download the files above, then use <strong style={{ color: 'var(--text)' }}>↑ Load data</strong> to upload them.
+            </div>
+          </div>
+        ) : records.length === 0 && activeTab !== 'forecast' ? (
+          // ── GBB empty state ───────────────────────────────────────────────────
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 400, gap: 18, textAlign: 'center' }}>
             <div style={{ fontSize: 44 }}>⚡</div>
             <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20 }}>No data loaded</div>
@@ -344,7 +483,7 @@ export default function App() {
             </div>
           </div>
         ) : (
-          <ActiveTab records={records} selectedYears={selectedYears} dateRange={dateRange} stats={stats} />
+          <ActiveTab records={records} selectedYears={selectedYears} dateRange={dateRange} stats={stats} {...(activeTab === 'prices' ? priceProps : {})} {...(activeTab === 'forecast' ? forecastProps : {})} />
         )}
       </main>
 
