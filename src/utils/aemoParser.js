@@ -36,9 +36,13 @@ export async function fetchAEMOData(onProgress) {
   try {
     const response = await fetch(AEMO_URL);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('zip') && !contentType.includes('octet-stream')) {
+      throw new Error(`AEMO fetch blocked — nemweb.com.au is not yet whitelisted on this server. Ask Ash to whitelist it, or load a local GBB file via ↑ Load data.`);
+    }
     zipBuffer = await response.arrayBuffer();
   } catch (e) {
-    throw new Error(`Failed to download: ${e.message}`);
+    throw new Error(e.message.startsWith('AEMO fetch blocked') ? e.message : `Failed to download: ${e.message}`);
   }
 
   onProgress?.('Unzipping...');
