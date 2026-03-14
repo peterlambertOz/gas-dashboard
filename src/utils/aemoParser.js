@@ -3,7 +3,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const AEMO_URL = '/aemo/Reports/Current/GBB/GasBBActualFlowStorage.zip';
+const AEMO_URL = 'https://www.nemweb.com.au/Reports/Current/GBB/GasBBActualFlowStorage.zip';
 
 const SE_STATES = new Set(['VIC', 'NSW', 'SA', 'TAS']);
 
