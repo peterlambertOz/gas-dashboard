@@ -2,5 +2,7 @@ services:
   app:
     build: .
     ports:
-      - " 3000:80\
- restart: unless-stopped
+      - "${PORT:-3000}:80"
+    volumes:
+      - ./public/data:/usr/share/nginx/html/data
+    restart: unless-stopped
