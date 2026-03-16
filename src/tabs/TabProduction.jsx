@@ -10,7 +10,7 @@ const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 
 export default function TabProduction({ records, selectedYears, dateRange }) {
   const latestYear = Math.max(...selectedYears);
-  const availableYears = useMemo(() => [...new Set(records.map(r => r.year))].sort(), [records]);
+  const availableYears = useMemo(() => [...selectedYears].sort(), [selectedYears]);
   const [viewYear, setViewYear] = useState(null);
   const sourceYear = viewYear ?? latestYear;
 
