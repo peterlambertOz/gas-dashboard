@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   ComposedChart, LineChart, AreaChart,
   Area, Line, Bar, XAxis, YAxis, CartesianGrid,
@@ -98,6 +98,23 @@ const NEMTooltip = ({ active, payload, label }) => {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function TabForecast({ records = [], selectedYears = [2026], forecastData = null, forecastPoeData = null, forecastDate = null, onLoadForecast }) {
+  const [resolvedDate, setResolvedDate] = useState(forecastDate);
+
+  // Scan /data/ directory listing to find most recent dated forecast files
+  useEffect(() => {
+    if (forecastDate) { setResolvedDate(forecastDate); return; }
+    fetch('/data/')
+      .then(r => r.ok ? r.json() : null)
+      .then(entries => {
+        if (!Array.isArray(entries)) return;
+        const dates = entries
+          .map(e => e.name?.match(/^gas_forecast_(\d{8})\.csv$/)?.[1])
+          .filter(Boolean)
+          .sort();
+        if (dates.length) setResolvedDate(dates[dates.length - 1]);
+      })
+      .catch(() => {});
+  }, [forecastDate]);
 
   const resolvedForecast = forecastData ?? [];
   const resolvedPoe      = forecastPoeData ?? {};
@@ -163,8 +180,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
         <div style={{ background: 'var(--surface-2, #161b22)', border: '1px solid var(--border, #30363d)', borderRadius: 8, padding: '16px 24px', maxWidth: 480, width: '100%', textAlign: 'left' }}>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontFamily: 'DM Mono, monospace' }}>Available data files</div>
           {[
-            { label: 'Gas demand forecast (main)',  file: forecastDate ? `gas_forecast_${forecastDate}.csv`     : 'gas_forecast_latest.csv' },
-            { label: 'Gas demand forecast (PoE)',   file: forecastDate ? `gas_forecast_poe_${forecastDate}.csv` : 'gas_forecast_poe_latest.csv' },
+            { label: 'Gas demand forecast (main)',  file: resolvedDate ? `gas_forecast_${resolvedDate}.csv`     : 'gas_forecast_latest.csv' },
+            { label: 'Gas demand forecast (PoE)',   file: resolvedDate ? `gas_forecast_poe_${resolvedDate}.csv` : 'gas_forecast_poe_latest.csv' },
           ].map(({ label, file }) => (
             <div key={file} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border, #30363d)' }}>
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>

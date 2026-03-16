@@ -404,16 +404,27 @@ export default function TabGasPrice({ selectedYears }) {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 420, gap: 20, textAlign: 'center' }}>
         <div style={{ fontSize: 44 }}>💲</div>
         <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20 }}>No price data loaded</div>
-        <div style={{ color: 'var(--text-muted)', maxWidth: 420, lineHeight: 1.6, fontSize: 13 }}>
-          Fetch STTM and DWGM price files from AEMO, or upload them below.
-          You can select both files at once.
+
+        <div style={{ background: 'var(--surface-2, #161b22)', border: '1px solid var(--border, #30363d)', borderRadius: 8, padding: '16px 24px', maxWidth: 420, width: '100%', textAlign: 'left' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontFamily: 'DM Mono, monospace' }}>Available data files</div>
+          {[
+            { label: 'DWGM prices (Victorian gas market)', file: 'DWGM.XLSX' },
+            { label: 'STTM prices (Sydney, Adelaide, Brisbane)', file: 'STTM.XLSX' },
+          ].map(({ label, file }) => (
+            <div key={file} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border, #30363d)' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
+              <a href={`/data/${file}`} download style={{ fontSize: 12, fontFamily: 'DM Mono, monospace', color: '#39d0d8', textDecoration: 'none' }}>⬇ {file}</a>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, fontFamily: 'DM Mono, monospace' }}>
+            Files updated periodically · download then use ↑ Load prices
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <button onClick={fetchBoth} disabled={loading.sttm || loading.dwgm} style={fetchBtnStyle('#388bfd')}>
-            {(loading.sttm || loading.dwgm) ? 'Fetching…' : '⬇ Fetch STTM + DWGM from AEMO'}
-          </button>
-        </div>
+        <label style={fetchBtnStyle('#bc8cff')}>
+          ↑ Load prices
+          <input type="file" accept=".xlsx,.xls" multiple onChange={handlePriceFiles} style={{ display: 'none' }} />
+        </label>
 
         <div style={{ display: 'flex', gap: 8 }}>
           <StatusBadge ok={loaded.sttm} label="STTM" />
@@ -421,11 +432,6 @@ export default function TabGasPrice({ selectedYears }) {
         </div>
         {error.sttm && <div style={{ color: '#f85149', fontSize: 12 }}>STTM: {error.sttm}</div>}
         {error.dwgm && <div style={{ color: '#f85149', fontSize: 12 }}>DWGM: {error.dwgm}</div>}
-
-        <label style={fetchBtnStyle('#bc8cff')}>
-          ↑ Load prices
-          <input type="file" accept=".xlsx,.xls" multiple onChange={handlePriceFiles} style={{ display: 'none' }} />
-        </label>
       </div>
     );
   }
