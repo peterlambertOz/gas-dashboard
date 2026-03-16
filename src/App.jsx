@@ -242,12 +242,15 @@ export default function App() {
     }
   }, [setSttmData, setDwgmWb, setPriceLoaded, setPriceError, setForecastData, setForecastPoeData]);
 
+  const [fileInputKey, setFileInputKey] = useState(0);
+
   const handleExcelUpload = useCallback(async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     for (const file of files) {
       await routeFile(file);
     }
+    setFileInputKey(k => k + 1);
   }, [routeFile]);
 
   const toggleYear = (y) => {
@@ -346,6 +349,7 @@ export default function App() {
             ↑ Load data
             <input
               type="file"
+              key={fileInputKey}
               accept=".xlsx,.xls,.csv"
               multiple
               onChange={handleExcelUpload}
