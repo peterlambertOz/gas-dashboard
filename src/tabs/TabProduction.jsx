@@ -2,7 +2,7 @@ import {
   ComposedChart, Area, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ChartCard, KpiCard, CustomTooltip, AXIS_STYLE, GRID_STYLE, CHART_COLORS, YEAR_COLORS, Legend, fmtDate } from '../components/ChartCard';
 import { exportToPowerPoint, exportToExcel } from '../utils/exportUtils';
 
@@ -10,6 +10,9 @@ const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 
 export default function TabProduction({ records, selectedYears, dateRange }) {
   const latestYear = Math.max(...selectedYears);
+  const availableYears = useMemo(() => [...new Set(records.map(r => r.year))].sort(), [records]);
+  const [viewYear, setViewYear] = useState(null);
+  const sourceYear = viewYear ?? latestYear;
 
   // Multi-year production overlay by day of year
   const yoyProduction = useMemo(() => {
@@ -45,7 +48,7 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
 
   // Production breakdown latest year — total incl QLD
   const latestProdBreakdown = useMemo(() =>
-    records.filter(r => r.year === latestYear && r.date >= dateRange[0] && r.date <= dateRange[1])
+    records.filter(r => r.year === sourceYear && r.date >= dateRange[0] && r.date <= dateRange[1])
       .map(r => ({
         date: r.date.substring(5),
         longford:      r.production_longford,
@@ -56,11 +59,11 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
         qld_other:     r.production_qld_other       || 0,
         other:         r.production_other_south,
       }))
-  , [records, latestYear, dateRange]);
+  , [records, sourceYear, dateRange]);
 
   // SE-only production breakdown
   const seBreakdown = useMemo(() =>
-    records.filter(r => r.year === latestYear && r.date >= dateRange[0] && r.date <= dateRange[1])
+    records.filter(r => r.year === sourceYear && r.date >= dateRange[0] && r.date <= dateRange[1])
       .map(r => ({
         date: r.date.substring(5),
         longford:   r.production_longford,
@@ -69,7 +72,7 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
         se_gipps:   r.production_se_gippsland || 0,
         se_other:   r.production_se_other    || 0,
       }))
-  , [records, latestYear, dateRange]);
+  , [records, sourceYear, dateRange]);
 
   const latestSwing = swingFactors.find(r => r.year === latestYear) || {};
   const prevSwing = swingFactors.find(r => r.year === latestYear - 1) || {};
@@ -115,13 +118,27 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
         <Legend items={selectedYears.map(y => ({ color: YEAR_COLORS[y] || '#888', label: String(y) }))} />
       </ChartCard>
 
+      {/* Year selector for source breakdown charts */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.07em' }}>View year</span>
+        {availableYears.map(y => (
+          <button key={y} onClick={() => setViewYear(y)} style={{
+            padding: '2px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12,
+            fontFamily: 'DM Mono, monospace', fontWeight: sourceYear === y ? 600 : 400,
+            border: `1px solid ${sourceYear === y ? YEAR_COLORS[y] || 'var(--accent)' : 'var(--border)'}`,
+            background: sourceYear === y ? (YEAR_COLORS[y] || 'var(--accent)') + '22' : 'transparent',
+            color: sourceYear === y ? YEAR_COLORS[y] || 'var(--accent)' : 'var(--text-muted)',
+          }}>{y}</button>
+        ))}
+      </div>
+
       {/* SE Production breakdown */}
       <ChartCard
         id="chart-prod-se"
-        title={`${latestYear} SE Production by Source`}
+        title={`${sourceYear} SE Production by Source`}
         subtitle="Stacked daily SE production: Longford (Gippsland Basin) / Moomba (Cooper Basin) / Otway Basin / Gippsland Other / Other SE (TJ/day)"
-        onExportPPT={() => handleExportPPT('chart-prod-se', `${latestYear} SE Production by Source`)}
-        onExportXLSX={() => exportToExcel(records.filter(r => r.year === latestYear))}
+        onExportPPT={() => handleExportPPT('chart-prod-se', `${sourceYear} SE Production by Source`)}
+        onExportXLSX={() => exportToExcel(records.filter(r => r.year === sourceYear))}
       >
         <ResponsiveContainer width="100%" height={280}>
           <ComposedChart data={seBreakdown} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
@@ -148,10 +165,10 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
       {/* Production source breakdown — total incl QLD */}
       <ChartCard
         id="chart-prod-breakdown"
-        title={`${latestYear} Total Production by Source (incl. QLD)`}
+        title={`${sourceYear} Total Production by Source (incl. QLD)`}
         subtitle="Stacked daily production: SE sources + QLD CSG sub-groups (TJ/day)"
-        onExportPPT={() => handleExportPPT('chart-prod-breakdown', `${latestYear} Production by Source`)}
-        onExportXLSX={() => exportToExcel(records.filter(r => r.year === latestYear))}
+        onExportPPT={() => handleExportPPT('chart-prod-breakdown', `${sourceYear} Production by Source`)}
+        onExportXLSX={() => exportToExcel(records.filter(r => r.year === sourceYear))}
       >
         <ResponsiveContainer width="100%" height={280}>
           <ComposedChart data={latestProdBreakdown} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>

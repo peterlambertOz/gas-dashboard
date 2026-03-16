@@ -273,6 +273,33 @@ export default function TabGasPrice({ selectedYears }) {
     e.target.value = '';
   }, []);
 
+  // Multi-file handler — auto-detects STTM vs DWGM by sheet names
+  const handlePriceFiles = useCallback((e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
+          const sheets = wb.SheetNames;
+          if (sheets.some(s => s.includes('price and withdrawals'))) {
+            setSttmData(parseSttm(wb));
+            setLoaded(prev => ({ ...prev, sttm: true }));
+          } else if (sheets.includes('Prices') && sheets.includes('Demand')) {
+            setRawDwgmWb(wb);
+            setLoaded(prev => ({ ...prev, dwgm: true }));
+          } else {
+            setError(prev => ({ ...prev, sttm: `Unrecognised file: ${file.name}` }));
+          }
+        } catch (err) {
+          setError(prev => ({ ...prev, sttm: err.message }));
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }, []);
+
   const fetchBoth = useCallback(() => {
     fetchAndParse(STTM_URL, 'sttm');
     fetchAndParse(DWGM_URL, 'dwgm');
@@ -378,21 +405,16 @@ export default function TabGasPrice({ selectedYears }) {
         <div style={{ fontSize: 44 }}>💲</div>
         <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20 }}>No price data loaded</div>
         <div style={{ color: 'var(--text-muted)', maxWidth: 420, lineHeight: 1.6, fontSize: 13 }}>
-          Fetch STTM and DWGM price files from AEMO, or upload them manually below.
+          Fetch STTM and DWGM price files from AEMO, or upload them below.
+          You can select both files at once.
         </div>
 
-        {/* Fetch buttons */}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <button
-            onClick={fetchBoth}
-            disabled={loading.sttm || loading.dwgm}
-            style={fetchBtnStyle('#388bfd')}
-          >
+          <button onClick={fetchBoth} disabled={loading.sttm || loading.dwgm} style={fetchBtnStyle('#388bfd')}>
             {(loading.sttm || loading.dwgm) ? 'Fetching…' : '⬇ Fetch STTM + DWGM from AEMO'}
           </button>
         </div>
 
-        {/* Status + errors */}
         <div style={{ display: 'flex', gap: 8 }}>
           <StatusBadge ok={loaded.sttm} label="STTM" />
           <StatusBadge ok={loaded.dwgm} label="DWGM" />
@@ -400,17 +422,10 @@ export default function TabGasPrice({ selectedYears }) {
         {error.sttm && <div style={{ color: '#f85149', fontSize: 12 }}>STTM: {error.sttm}</div>}
         {error.dwgm && <div style={{ color: '#f85149', fontSize: 12 }}>DWGM: {error.dwgm}</div>}
 
-        {/* Manual upload */}
-        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-          <label style={fetchBtnStyle('#bc8cff')}>
-            ↑ Upload STTM xlsx
-            <input type="file" accept=".xlsx,.xls" onChange={e => handleFileUpload(e, 'sttm')} style={{ display: 'none' }} />
-          </label>
-          <label style={fetchBtnStyle('#39d0d8')}>
-            ↑ Upload DWGM xlsx
-            <input type="file" accept=".xlsx,.xls" onChange={e => handleFileUpload(e, 'dwgm')} style={{ display: 'none' }} />
-          </label>
-        </div>
+        <label style={fetchBtnStyle('#bc8cff')}>
+          ↑ Load prices
+          <input type="file" accept=".xlsx,.xls" multiple onChange={handlePriceFiles} style={{ display: 'none' }} />
+        </label>
       </div>
     );
   }
@@ -435,14 +450,14 @@ export default function TabGasPrice({ selectedYears }) {
           style={{ ...btnStyle(false, '#388bfd'), marginLeft: 'auto' }}>
           {loading.sttm || loading.dwgm ? 'Fetching…' : '⟳ Refresh'}
         </button>
-        <label style={btnStyle(false, '#bc8cff')}>
-          ↑ STTM
-          <input type="file" accept=".xlsx,.xls" onChange={e => handleFileUpload(e, 'sttm')} style={{ display: 'none' }} />
-        </label>
-        <label style={btnStyle(false, '#39d0d8')}>
-          ↑ DWGM
-          <input type="file" accept=".xlsx,.xls" onChange={e => handleFileUpload(e, 'dwgm')} style={{ display: 'none' }} />
-        </label>
+
+        {/* Upload missing file */}
+        {(!loaded.sttm || !loaded.dwgm) && (
+          <label style={btnStyle(false, '#bc8cff')}>
+            {!loaded.sttm && !loaded.dwgm ? '↑ Load prices' : !loaded.sttm ? '↑ Load STTM' : '↑ Load DWGM'}
+            <input type="file" accept=".xlsx,.xls" multiple onChange={handlePriceFiles} style={{ display: 'none' }} />
+          </label>
+        )}
 
         {/* DWGM price method toggle */}
         {loaded.dwgm && (

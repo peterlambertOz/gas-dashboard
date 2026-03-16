@@ -97,7 +97,7 @@ const NEMTooltip = ({ active, payload, label }) => {
 };
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function TabForecast({ records = [], selectedYears = [2026], forecastData = null, forecastPoeData = null, forecastDate = null }) {
+export default function TabForecast({ records = [], selectedYears = [2026], forecastData = null, forecastPoeData = null, forecastDate = null, onLoadForecast }) {
 
   const resolvedForecast = forecastData ?? [];
   const resolvedPoe      = forecastPoeData ?? {};
@@ -165,8 +165,6 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
           {[
             { label: 'Gas demand forecast (main)',  file: forecastDate ? `gas_forecast_${forecastDate}.csv`     : 'gas_forecast_latest.csv' },
             { label: 'Gas demand forecast (PoE)',   file: forecastDate ? `gas_forecast_poe_${forecastDate}.csv` : 'gas_forecast_poe_latest.csv' },
-            { label: 'DWGM prices',                 file: 'DWGM.XLSX' },
-            { label: 'STTM prices',                 file: 'STTM.XLSX' },
           ].map(({ label, file }) => (
             <div key={file} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border, #30363d)' }}>
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
@@ -176,14 +174,30 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
             </div>
           ))}
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, fontFamily: 'DM Mono, monospace' }}>
-            Files updated daily · select all at once with ↑ Load data
+            Files updated daily · use ↑ Load forecasts below to upload
           </div>
         </div>
 
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 400, lineHeight: 1.6 }}>
-          Download the files above, then use <strong style={{ color: 'var(--text)' }}>↑ Load data</strong> to upload them.
-          You can select multiple files at once — forecast, PoE, DWGM and STTM all upload in one go.
-        </div>
+        <label style={{
+          padding: '8px 20px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+          fontFamily: 'Syne, sans-serif', fontWeight: 600,
+          border: '1px solid #bc8cff', background: '#bc8cff22', color: '#bc8cff',
+        }}>
+          ↑ Load forecasts
+          <input
+            type="file"
+            accept=".csv"
+            multiple
+            onChange={async e => {
+              const files = Array.from(e.target.files || []);
+              e.target.value = '';
+              for (const file of files) {
+                if (onLoadForecast) await onLoadForecast(file);
+              }
+            }}
+            style={{ display: 'none' }}
+          />
+        </label>
       </div>
     );
   }

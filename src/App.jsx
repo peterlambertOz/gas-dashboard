@@ -55,7 +55,6 @@ export default function App() {
   // ── Forecast data state ────────────────────────────────────────────────────────
   const [forecastData,    setForecastData]    = useState(null);  // parsed main CSV rows
   const [forecastPoeData, setForecastPoeData] = useState(null);  // parsed POE CSV rows
-  const [forecastDate,    setForecastDate]    = useState(null);  // e.g. '20260313' from filename
 
   // ── Price data state (STTM + DWGM) ──────────────────────────────────────────
   const [sttmData,   setSttmData]   = useState({});
@@ -155,8 +154,6 @@ export default function App() {
 
     // Forecast main CSV
     if (name.includes('gas_forecast') && name.endsWith('.csv')) {
-      const dateMatch = name.match(/(\d{8})/);
-      if (dateMatch) setForecastDate(dateMatch[1]);
       const text = await file.text();
       const lines = text.trim().split(/\r?\n/).filter(Boolean);
       const headers = lines[0].split(',').map(h => h.trim());
@@ -242,15 +239,12 @@ export default function App() {
     }
   }, [setSttmData, setDwgmWb, setPriceLoaded, setPriceError, setForecastData, setForecastPoeData]);
 
-  const [fileInputKey, setFileInputKey] = useState(0);
-
   const handleExcelUpload = useCallback(async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     for (const file of files) {
       await routeFile(file);
     }
-    setFileInputKey(k => k + 1);
   }, [routeFile]);
 
   const toggleYear = (y) => {
@@ -285,7 +279,7 @@ export default function App() {
 
   const ActiveTab = { demand: TabDailyDemand, forecast: TabForecast, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
   const priceProps    = { sttmData, dwgmWb, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
-  const forecastProps = { forecastData, forecastPoeData, forecastDate };
+  const forecastProps = { forecastData, forecastPoeData, onLoadForecast: routeFile };
 
   const btnBase = (color, active) => ({
     padding: '4px 13px', borderRadius: 5,
@@ -340,23 +334,6 @@ export default function App() {
           <button onClick={() => loadData(true)} disabled={loading} style={btnBase('var(--text-muted)', false)}>
             Demo
           </button>
-          <label style={{
-            ...btnBase('#bc8cff', false),
-            cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.5 : 1,
-            display: 'inline-block',
-          }}>
-            ↑ Load data
-            <input
-              type="file"
-              key={fileInputKey}
-              accept=".xlsx,.xls,.csv"
-              multiple
-              onChange={handleExcelUpload}
-              disabled={loading}
-              style={{ display: 'none' }}
-            />
-          </label>
           <button onClick={handleExportXLSX} disabled={!records.length} style={btnBase('#3fb950', false)}>
             ↓ XLSX
           </button>
@@ -443,32 +420,7 @@ export default function App() {
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-muted)', fontSize: 12 }}>{loadMsg}</div>
           </div>
-        ) : activeTab === 'prices' && !priceLoaded.sttm && !priceLoaded.dwgm ? (
-          // ── Prices empty state ────────────────────────────────────────────────
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 400, gap: 20, textAlign: 'center' }}>
-            <div style={{ fontSize: 44 }}>💹</div>
-            <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20 }}>No price data loaded</div>
-            <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 8, padding: '16px 24px', maxWidth: 480, width: '100%', textAlign: 'left' }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontFamily: 'DM Mono, monospace' }}>Available data files</div>
-              {[
-                { label: 'DWGM prices (Victorian gas market)', file: 'DWGM.XLSX' },
-                { label: 'STTM prices (Sydney, Adelaide, Brisbane)', file: 'STTM.XLSX' },
-              ].map(({ label, file }) => (
-                <div key={file} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #30363d' }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
-                  <a href={`/data/${file}`} download style={{ fontSize: 12, fontFamily: 'DM Mono, monospace', color: '#39d0d8', textDecoration: 'none' }}>⬇ {file}</a>
-                </div>
-              ))}
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, fontFamily: 'DM Mono, monospace' }}>
-                Files updated periodically · use ↑ Load data to upload
-              </div>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 400, lineHeight: 1.6 }}>
-              Download the files above, then use <strong style={{ color: 'var(--text)' }}>↑ Load data</strong> to upload them.
-            </div>
-          </div>
-        ) : records.length === 0 && activeTab !== 'forecast' ? (
-          // ── GBB empty state ───────────────────────────────────────────────────
+        ) : records.length === 0 && activeTab !== 'prices' && activeTab !== 'forecast' ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 400, gap: 18, textAlign: 'center' }}>
             <div style={{ fontSize: 44 }}>⚡</div>
             <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20 }}>No data loaded</div>
