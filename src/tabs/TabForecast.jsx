@@ -85,12 +85,12 @@ const NEMTooltip = ({ active, payload, label }) => {
       {[...payload].reverse().map((p, i) => (
         <div key={i} style={{ color: p.fill || C.text, display: 'flex', gap: 8, justifyContent: 'space-between' }}>
           <span>{p.name}</span>
-          <span style={{ fontFamily: 'DM Mono, monospace' }}>{(p.value/1000).toFixed(0)} GWh</span>
+          <span style={{ fontFamily: 'DM Mono, monospace' }}>{p.value.toFixed(0)} GWh</span>
         </div>
       ))}
       <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 6, paddingTop: 6, color: C.text, display: 'flex', gap: 8, justifyContent: 'space-between' }}>
         <span>Total</span>
-        <span style={{ fontFamily: 'DM Mono, monospace' }}>{(total/1000).toFixed(0)} GWh</span>
+        <span style={{ fontFamily: 'DM Mono, monospace' }}>{total.toFixed(0)} GWh</span>
       </div>
     </div>
   );
@@ -314,7 +314,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
             <Area type="monotone" dataKey="solar" stackId="nem" fill={C.solar} stroke="none" name="Solar" />
             <Area type="monotone" dataKey="hydro" stackId="nem" fill={C.hydro} stroke="none" name="Hydro" />
             <Area type="monotone" dataKey="gas"   stackId="nem" fill={C.gas}   stroke="none" name="Gas" />
-            <Area type="monotone" dataKey="other" stackId="nem" fill={C.other} stroke="none" name="Other incl BESS and oil" fillOpacity={0.8} />
+            <Area type="monotone" dataKey="residual" stackId="nem" fill={C.other} stroke="none" name="Other incl BESS and oil" fillOpacity={0.8} />
           </ComposedChart>
         </ResponsiveContainer>
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11 }}>
