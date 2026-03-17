@@ -62,6 +62,44 @@ export async function fetchAEMOData(onProgress) {
   return aggregateRows(allRows);
 }
 
+// ── DWGM CSV fetch (nemweb INT310) ────────────────────────────────────────────
+const DWGM_URL = 'https://www.nemweb.com.au/REPORTS/CURRENT/VicGas/INT310_V4_PRICE_AND_WITHDRAWALS_1.CSV';
+
+function parseDwgmCsv(text) {
+  // Columns: gas_date, schedule_interval, transmission_id, sched_inj_gj,
+  //          sched_wdl_gj, price_value, administered_price, actual_wdl_gj, actual_inj_gj
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, transformHeader: h => h.trim() });
+  const dayBuckets = {}; // { 'YYYY-MM-DD': number[] }
+  for (const row of parsed.data) {
+    const raw = row['gas_date'];
+    const price = parseFloat(row['price_value']);
+    if (!raw || isNaN(price)) continue;
+    // Parse "17 Mar 2026" → "2026-03-17"
+    const d = new Date(raw);
+    if (isNaN(d)) continue;
+    const dateStr = d.toISOString().slice(0, 10);
+    if (!dayBuckets[dateStr]) dayBuckets[dateStr] = [];
+    dayBuckets[dateStr].push(price);
+  }
+  const prices = {};
+  for (const [d, vals] of Object.entries(dayBuckets)) {
+    prices[d] = vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+  return prices; // { 'YYYY-MM-DD': avgPrice }
+}
+
+export async function fetchDwgmData(onProgress) {
+  onProgress?.('Downloading DWGM prices...');
+  try {
+    const response = await fetch(DWGM_URL);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    return parseDwgmCsv(text);
+  } catch (e) {
+    throw new Error(`Failed to download DWGM: ${e.message}`);
+  }
+}
+
 // SE pipeline linepack delta — SE trunk pipes only, EXCLUDING SWQP
 // (SWQP's net QLD↔SE flow is already captured in qld_net_flow / qld_supply)
 const SE_LINEPACK_PIPES = new Set(['VTS','MSP','EGP','MAPS','PCA','PCI','TGP','MPL','SESA',

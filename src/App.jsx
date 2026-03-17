@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
-import { fetchAEMOData, loadFromExcel, generateSampleData, computeStats } from './utils/aemoParser';
+import { fetchAEMOData, fetchDwgmData, loadFromExcel, generateSampleData, computeStats } from './utils/aemoParser';
 import { exportToExcel, exportToPowerPoint } from './utils/exportUtils';
 import TabDailyDemand from './tabs/TabDailyDemand';
 import TabGPG from './tabs/TabGPG';
@@ -57,10 +57,11 @@ export default function App() {
   const [forecastPoeData, setForecastPoeData] = useState(null);  // parsed POE CSV rows
 
   // ── Price data state (STTM + DWGM) ──────────────────────────────────────────
-  const [sttmData,   setSttmData]   = useState({});
-  const [dwgmWb,     setDwgmWb]     = useState(null);
-  const [priceLoaded,setPriceLoaded]= useState({ sttm: false, dwgm: false });
-  const [priceError, setPriceError] = useState({ sttm: null,  dwgm: null  });
+  const [sttmData,    setSttmData]   = useState({});
+  const [dwgmWb,      setDwgmWb]     = useState(null);
+  const [dwgmPrices,  setDwgmPrices] = useState(null); // from CSV fetch
+  const [priceLoaded, setPriceLoaded]= useState({ sttm: false, dwgm: false });
+  const [priceError,  setPriceError] = useState({ sttm: null,  dwgm: null  });
   const [selectedYears, setSelectedYears] = useState([2023, 2024, 2025]);
   const [dateRange, setDateRange] = useState(['2019-01-01', '2025-12-31']);
   const [stats, setStats] = useState({});
@@ -94,6 +95,13 @@ export default function App() {
         } catch (cacheErr) {
           console.warn('Cache save failed (storage full?):', cacheErr);
         }
+        // Fetch DWGM prices in background — don't block GBB load if it fails
+        fetchDwgmData(setLoadMsg).then(prices => {
+          setDwgmPrices(prices);
+          setPriceLoaded(prev => ({ ...prev, dwgm: true }));
+        }).catch(e => {
+          console.warn('DWGM fetch failed:', e.message);
+        });
       }
     } catch (e) {
       setError(e.message);
@@ -278,7 +286,7 @@ export default function App() {
   };
 
   const ActiveTab = { demand: TabDailyDemand, forecast: TabForecast, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
-  const priceProps    = { sttmData, dwgmWb, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
+  const priceProps    = { sttmData, dwgmWb, dwgmPrices, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
   const forecastProps = { forecastData, forecastPoeData, onLoadForecast: routeFile };
 
   const btnBase = (color, active) => ({

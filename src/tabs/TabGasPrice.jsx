@@ -13,7 +13,7 @@
  * Daily DWGM price = mean of all intervals (default) or 6am only (ASX reference)
  */
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import {
   LineChart, Line, ComposedChart, Area, Bar,
@@ -189,7 +189,7 @@ function StatusBadge({ ok, label }) {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function TabGasPrice({ selectedYears }) {
+export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp }) {
   // ── Data state ───────────────────────────────────────────────────────────────
   const [priceRecords, setPriceRecords] = useState([]);
   const [loading, setLoading]           = useState({ sttm: false, dwgm: false });
@@ -200,6 +200,13 @@ export default function TabGasPrice({ selectedYears }) {
   const [sttmData,    setSttmData]    = useState({});
   const [dwgmPrices,  setDwgmPrices]  = useState({});
   const [dwgmDemand,  setDwgmDemand]  = useState({});
+
+  // Sync DWGM prices from App.jsx fetch (CSV) into internal state
+  useEffect(() => {
+    if (!dwgmPricesProp) return;
+    setDwgmPrices(dwgmPricesProp);
+    setLoaded(prev => ({ ...prev, dwgm: true }));
+  }, [dwgmPricesProp]);
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [use6am,        setUse6am]        = useState(false);
