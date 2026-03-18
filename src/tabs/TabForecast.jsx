@@ -228,9 +228,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
       actual:   r[actualKey],
       poe_lo:   r[poeLoKey],
       poe_hi:   r[poeHiKey],
-      // For area rendering: floor at min, span = abs difference
-      poe_base: r[poeLoKey] != null && r[poeLoKey] > 0 ? r[poeLoKey] : null,
-      poe_span: (r[poeLoKey] != null && r[poeHiKey] != null && r[poeLoKey] > 0 && r[poeHiKey] > 0) ? r[poeHiKey] - r[poeLoKey] : null,
+      // Range band: null if either value missing or zero (undefined floor)
+      poe_band: (r[poeLoKey] != null && r[poeHiKey] != null) ? [r[poeLoKey], r[poeHiKey]] : null,
     }));
 
     return (
@@ -241,9 +240,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
             <XAxis dataKey="label" {...AXIS} interval={9} />
             <YAxis {...AXIS} width={38} domain={yDomain || ['auto','auto']} unit="" tickFormatter={v => v} />
             <Tooltip content={<CustomTooltip unit="TJ/day" />} />
-            {/* POE band: invisible floor + shaded span */}
-            <Area dataKey="poe_base" stackId="poe" stroke="none" fill="none" legendType="none" name="__hidden__" connectNulls />
-            <Area dataKey="poe_span" stackId="poe" stroke="none" fill={color} fillOpacity={0.35} legendType="none" name="__hidden__" connectNulls />
+            {/* PoE band using native range area */}
+            <Area type="monotone" dataKey="poe_band" stroke="none" fill={color} fillOpacity={0.35} legendType="none" name="__hidden__" />
             {/* PoE boundary lines */}
             <Line dataKey="poe_lo" stroke={color} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 90" connectNulls />
             <Line dataKey="poe_hi" stroke={color} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 10" connectNulls />

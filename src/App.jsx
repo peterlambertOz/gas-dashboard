@@ -191,13 +191,14 @@ export default function App() {
         }
         const p10_total = parseFloat(raw.poe10_total_tj ?? raw.p10_total_tj);
         if (isNaN(p10_total)) return; // no PoE columns in this file
+        const parsePoE = v => { const n = parseFloat(v); return isNaN(n) ? null : n === 0 ? 0.1 : n; };
         poeMap[poeDate] = {
-          p10_total:  p10_total,
-          p90_total:  parseFloat(raw.poe90_total_tj  ?? raw.p90_total_tj)  || null,
-          p10_gpg:    parseFloat(raw.poe10_gpg_tj    ?? raw.p10_gpg_tj)    || null,
-          p90_gpg:    parseFloat(raw.poe90_gpg_tj    ?? raw.p90_gpg_tj)    || null,
-          p10_nonpwr: parseFloat(raw.poe10_nonpwr_tj ?? raw.p10_nonpwr_tj) || null,
-          p90_nonpwr: parseFloat(raw.poe90_nonpwr_tj ?? raw.p90_nonpwr_tj) || null,
+          p10_total:  parsePoE(raw.poe10_total_tj ?? raw.p10_total_tj),
+          p90_total:  parsePoE(raw.poe90_total_tj ?? raw.p90_total_tj),
+          p10_gpg:    parsePoE(raw.poe10_gpg_tj   ?? raw.p10_gpg_tj),
+          p90_gpg:    parsePoE(raw.poe90_gpg_tj   ?? raw.p90_gpg_tj),
+          p10_nonpwr: parsePoE(raw.poe10_nonpwr_tj ?? raw.p10_nonpwr_tj),
+          p90_nonpwr: parsePoE(raw.poe90_nonpwr_tj ?? raw.p90_nonpwr_tj),
         };
       });
       if (Object.keys(poeMap).length) setForecastPoeData(poeMap);
