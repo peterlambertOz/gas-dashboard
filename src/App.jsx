@@ -195,6 +195,24 @@ export default function App() {
         };
       });
       setForecastData(rows);
+      // Also extract PoE bands if present in the same file
+      const poeMap = {};
+      lines.slice(1).forEach(l => {
+        const vals = l.split(',');
+        const raw = Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim() ?? '']));
+        if (!raw.date) return;
+        const p10_total = parseFloat(raw.p10_total_tj);
+        if (isNaN(p10_total)) return; // no PoE columns in this file
+        poeMap[raw.date] = {
+          p10_total:  p10_total,
+          p90_total:  parseFloat(raw.p90_total_tj)   || null,
+          p10_gpg:    parseFloat(raw.p10_gpg_tj)     || null,
+          p90_gpg:    parseFloat(raw.p90_gpg_tj)     || null,
+          p10_nonpwr: parseFloat(raw.p10_nonpwr_tj)  || null,
+          p90_nonpwr: parseFloat(raw.p90_nonpwr_tj)  || null,
+        };
+      });
+      if (Object.keys(poeMap).length) setForecastPoeData(poeMap);
       return;
     }
 
