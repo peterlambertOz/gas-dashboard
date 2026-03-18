@@ -137,30 +137,7 @@ export default function App() {
   const routeFile = useCallback(async (file) => {
     const name = file.name.toLowerCase();
 
-    // Forecast POE CSV — must be checked before main forecast (more specific filename)
-    if (name.includes('gas_forecast_poe') && name.endsWith('.csv')) {
-      const text = await file.text();
-      const lines = text.trim().split(/\r?\n/).filter(Boolean);
-      const headers = lines[0].split(',').map(h => h.trim());
-      const poeMap = {};
-      lines.slice(1).forEach(l => {
-        const vals = l.split(',');
-        const raw = Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim() ?? '']));
-        if (!raw.date) return;
-        poeMap[raw.date] = {
-          p10_total:  parseFloat(raw.p10_total_tj)   || null,
-          p90_total:  parseFloat(raw.p90_total_tj)   || null,
-          p10_gpg:    parseFloat(raw.p10_gpg_tj)     || null,
-          p90_gpg:    parseFloat(raw.p90_gpg_tj)     || null,
-          p10_nonpwr: parseFloat(raw.p10_nonpwr_tj)  || null,
-          p90_nonpwr: parseFloat(raw.p90_nonpwr_tj)  || null,
-        };
-      });
-      setForecastPoeData(poeMap);
-      return;
-    }
-
-    // Forecast main CSV
+    // Forecast main CSV (PoE bands now embedded in same file)
     if (name.includes('gas_forecast') && name.endsWith('.csv')) {
       const text = await file.text();
       const lines = text.trim().split(/\r?\n/).filter(Boolean);
@@ -169,8 +146,14 @@ export default function App() {
         const vals = l.split(',');
         const raw = Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim() ?? '']));
         const gpg_tj = parseFloat(raw.pred_gpg_tj) || 0;
+        // Normalise date: handle both yyyy-MM-dd and d/MM/yyyy formats
+        let date = raw.date;
+        if (date && date.includes('/')) {
+          const [d, m, y] = date.split('/');
+          date = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+        }
         return {
-          date:       raw.date,
+          date,
           period:     raw.period,
           pred_total: parseFloat(raw.pred_total_tj)          || 0,
           pred_gpg:   gpg_tj,
@@ -201,15 +184,20 @@ export default function App() {
         const vals = l.split(',');
         const raw = Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim() ?? '']));
         if (!raw.date) return;
-        const p10_total = parseFloat(raw.p10_total_tj);
+        let poeDate = raw.date;
+        if (poeDate.includes('/')) {
+          const [d, m, y] = poeDate.split('/');
+          poeDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+        }
+        const p10_total = parseFloat(raw.poe10_total_tj ?? raw.p10_total_tj);
         if (isNaN(p10_total)) return; // no PoE columns in this file
-        poeMap[raw.date] = {
+        poeMap[poeDate] = {
           p10_total:  p10_total,
-          p90_total:  parseFloat(raw.p90_total_tj)   || null,
-          p10_gpg:    parseFloat(raw.p10_gpg_tj)     || null,
-          p90_gpg:    parseFloat(raw.p90_gpg_tj)     || null,
-          p10_nonpwr: parseFloat(raw.p10_nonpwr_tj)  || null,
-          p90_nonpwr: parseFloat(raw.p90_nonpwr_tj)  || null,
+          p90_total:  parseFloat(raw.poe90_total_tj  ?? raw.p90_total_tj)  || null,
+          p10_gpg:    parseFloat(raw.poe10_gpg_tj    ?? raw.p10_gpg_tj)    || null,
+          p90_gpg:    parseFloat(raw.poe90_gpg_tj    ?? raw.p90_gpg_tj)    || null,
+          p10_nonpwr: parseFloat(raw.poe10_nonpwr_tj ?? raw.p10_nonpwr_tj) || null,
+          p90_nonpwr: parseFloat(raw.poe90_nonpwr_tj ?? raw.p90_nonpwr_tj) || null,
         };
       });
       if (Object.keys(poeMap).length) setForecastPoeData(poeMap);
