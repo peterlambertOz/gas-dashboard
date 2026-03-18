@@ -148,13 +148,13 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
         label: fmtDate(r.date),
         actual_total, actual_gpg, actual_nonpwr,
         actual_vic, actual_nsw, actual_sa, actual_tas,
-        // POE band: [low, high-low] for area stacking
-        poe_total_lo:  poe?.p10_total  || null,
-        poe_total_hi:  poe?.p90_total  || null,
-        poe_gpg_lo:    poe?.p10_gpg    || null,
-        poe_gpg_hi:    poe?.p90_gpg    || null,
-        poe_nonpwr_lo: poe?.p10_nonpwr || null,
-        poe_nonpwr_hi: poe?.p90_nonpwr || null,
+        // POE band: PoE90 = floor (lower value), PoE10 = ceiling (higher value)
+        poe_total_lo:  poe ? poe.p90_total  : null,
+        poe_total_hi:  poe ? poe.p10_total  : null,
+        poe_gpg_lo:    poe ? poe.p90_gpg    : null,
+        poe_gpg_hi:    poe ? poe.p10_gpg    : null,
+        poe_nonpwr_lo: poe ? poe.p90_nonpwr : null,
+        poe_nonpwr_hi: poe ? poe.p10_nonpwr : null,
         // NEM stack (MWh)
         coal:     r.pred_coal,
         wind:     r.pred_wind,
@@ -228,9 +228,9 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
       actual:   r[actualKey],
       poe_lo:   r[poeLoKey],
       poe_hi:   r[poeHiKey],
-      // For area rendering: [lo, spread]
-      poe_base: r[poeLoKey],
-      poe_span: r[poeHiKey] != null && r[poeLoKey] != null ? r[poeHiKey] - r[poeLoKey] : null,
+      // For area rendering: floor at min, span = abs difference
+      poe_base: r[poeLoKey] != null ? r[poeLoKey] : null,
+      poe_span: (r[poeLoKey] != null && r[poeHiKey] != null) ? r[poeHiKey] - r[poeLoKey] : null,
     }));
 
     return (
@@ -245,8 +245,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
             <Area dataKey="poe_base" stackId="poe" stroke="none" fill="none" legendType="none" name="__hidden__" connectNulls />
             <Area dataKey="poe_span" stackId="poe" stroke="none" fill={color} fillOpacity={0.35} legendType="none" name="__hidden__" connectNulls />
             {/* PoE boundary lines */}
-            <Line dataKey="poe_lo" stroke={color} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 10" connectNulls />
-            <Line dataKey="poe_hi" stroke={color} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 90" connectNulls />
+            <Line dataKey="poe_lo" stroke={color} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 90" connectNulls />
+            <Line dataKey="poe_hi" stroke={color} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 10" connectNulls />
             {/* Forecast */}
             <Line dataKey="forecast" stroke={color} strokeWidth={2} dot={false} name="Forecast" connectNulls />
             {/* Actual dots */}
