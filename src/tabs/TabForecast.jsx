@@ -149,12 +149,12 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
         actual_total, actual_gpg, actual_nonpwr,
         actual_vic, actual_nsw, actual_sa, actual_tas,
         // POE band: [low, high-low] for area stacking
-        poe_total_lo:  poe ? poe.p10_total  : null,
-        poe_total_hi:  poe ? poe.p90_total  : null,
-        poe_gpg_lo:    poe ? poe.p10_gpg    : null,
-        poe_gpg_hi:    poe ? poe.p90_gpg    : null,
-        poe_nonpwr_lo: poe ? poe.p10_nonpwr : null,
-        poe_nonpwr_hi: poe ? poe.p90_nonpwr : null,
+        poe_total_lo:  poe?.p10_total  || null,
+        poe_total_hi:  poe?.p90_total  || null,
+        poe_gpg_lo:    poe?.p10_gpg    || null,
+        poe_gpg_hi:    poe?.p90_gpg    || null,
+        poe_nonpwr_lo: poe?.p10_nonpwr || null,
+        poe_nonpwr_hi: poe?.p90_nonpwr || null,
         // NEM stack (MWh)
         coal:     r.pred_coal,
         wind:     r.pred_wind,
@@ -180,8 +180,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
         <div style={{ background: 'var(--surface-2, #161b22)', border: '1px solid var(--border, #30363d)', borderRadius: 8, padding: '16px 24px', maxWidth: 480, width: '100%', textAlign: 'left' }}>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontFamily: 'DM Mono, monospace' }}>Available data files</div>
           {[
-            { label: 'Gas demand forecast (main)',  file: resolvedDate ? `gas_forecast_${resolvedDate}.csv`     : 'gas_forecast_latest.csv' },
-            { label: 'Gas demand forecast (PoE)',   file: resolvedDate ? `gas_forecast_poe_${resolvedDate}.csv` : 'gas_forecast_poe_latest.csv' },
+            { label: 'Gas demand forecast', file: resolvedDate ? `gas_forecast_${resolvedDate}.csv` : 'gas_forecast_latest.csv' },
           ].map(({ label, file }) => (
             <div key={file} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border, #30363d)' }}>
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
@@ -243,8 +242,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
             <YAxis {...AXIS} width={38} domain={yDomain || ['auto','auto']} unit="" tickFormatter={v => v} />
             <Tooltip content={<CustomTooltip unit="TJ/day" />} />
             {/* POE band: invisible floor + shaded span */}
-            <Area dataKey="poe_base" stackId="poe" stroke="none" fill="none" legendType="none" name="__hidden__" />
-            <Area dataKey="poe_span" stackId="poe" stroke="none" fill={color} fillOpacity={0.35} legendType="none" name="__hidden__" />
+            <Area dataKey="poe_base" stackId="poe" stroke="none" fill="none" legendType="none" name="__hidden__" connectNulls />
+            <Area dataKey="poe_span" stackId="poe" stroke="none" fill={color} fillOpacity={0.35} legendType="none" name="__hidden__" connectNulls />
             {/* PoE boundary lines */}
             <Line dataKey="poe_lo" stroke={color} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 10" connectNulls />
             <Line dataKey="poe_hi" stroke={color} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 90" connectNulls />
