@@ -229,8 +229,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
       poe_lo:   r[poeLoKey],
       poe_hi:   r[poeHiKey],
       // For area rendering: floor at min, span = abs difference
-      poe_base: r[poeLoKey] != null ? r[poeLoKey] : null,
-      poe_span: (r[poeLoKey] != null && r[poeHiKey] != null) ? r[poeHiKey] - r[poeLoKey] : null,
+      poe_base: r[poeLoKey] != null && r[poeLoKey] > 0 ? r[poeLoKey] : null,
+      poe_span: (r[poeLoKey] != null && r[poeHiKey] != null && r[poeLoKey] > 0 && r[poeHiKey] > 0) ? r[poeHiKey] - r[poeLoKey] : null,
     }));
 
     return (
