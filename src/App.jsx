@@ -12,11 +12,13 @@ import TabFlowMap from './tabs/TabFlowMap';
 import TabLNG from './tabs/TabLNG';
 import TabGasPrice from './tabs/TabGasPrice';
 import TabForecast from './tabs/TabForecast';
+import TabHistoricalWeather from './tabs/TabHistoricalWeather';
 
 const TABS = [
-  { id: 'demand',     label: 'Daily Demand' },
-  { id: 'forecast',   label: 'Forecast Demand' },
-  { id: 'gpg',        label: 'GPG Analysis' },
+  { id: 'demand',    label: 'Daily Demand' },
+  { id: 'forecast',  label: 'Forecast Demand' },
+  { id: 'historical', label: 'Historical Weather' },
+  { id: 'gpg',       label: 'GPG Analysis' },
   { id: 'supply',     label: 'Supply & Capacity' },
   { id: 'production', label: 'Production' },
   { id: 'storage',    label: 'Storage (Iona)' },
@@ -55,6 +57,10 @@ export default function App() {
   // ── Forecast data state ────────────────────────────────────────────────────────
   const [forecastData,    setForecastData]    = useState(null);  // parsed main CSV rows
   const [forecastPoeData, setForecastPoeData] = useState(null);  // parsed POE CSV rows
+
+  // ── Historical weather data state (Section 9 outputs) ────────────────────────
+  const [histPoe,    setHistPoe]    = useState(null);
+  const [histTraces, setHistTraces] = useState(null);
 
   // ── Price data state (STTM + DWGM) ──────────────────────────────────────────
   const [sttmData,    setSttmData]   = useState({});
@@ -169,6 +175,7 @@ export default function App() {
           pred_coal:  parseFloat(raw.pred_coal_mwh)          || 0,
           pred_gas_mwh: Math.round(gpg_tj * 1000 / 8.5),
           // pass through actuals if present
+          actual_total_tj:      parseFloat(raw.actual_total_tj)       || null,
           actual_gpg_tj:        parseFloat(raw.actual_gpg_tj)         || null,
           actual_nonpower_tj:   parseFloat(raw.actual_nonpower_tj)    || null,
           actual_vic_nonpower_tj: parseFloat(raw.actual_vic_nonpower_tj) || null,
@@ -292,9 +299,16 @@ export default function App() {
     if (records.length) exportToExcel(records.filter(r => selectedYears.includes(r.year)));
   };
 
-  const ActiveTab = { demand: TabDailyDemand, forecast: TabForecast, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
-  const priceProps    = { sttmData, dwgmWb, dwgmPrices, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
-  const forecastProps = { forecastData, forecastPoeData, onLoadForecast: routeFile };
+  const ActiveTab = { demand: TabDailyDemand, forecast: TabForecast, historical: TabHistoricalWeather, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
+  const priceProps      = { sttmData, dwgmWb, dwgmPrices, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
+  const forecastProps   = {
+    forecastData, forecastPoeData, onLoadForecast: routeFile,
+    onForecastAutoLoaded: (rows, poeMap) => {
+      setForecastData(rows);
+      if (poeMap) setForecastPoeData(poeMap);
+    },
+  };
+  const historicalProps = { histPoe, histTraces, records };
 
   const btnBase = (color, active) => ({
     padding: '4px 13px', borderRadius: 5,
@@ -435,7 +449,7 @@ export default function App() {
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-muted)', fontSize: 12 }}>{loadMsg}</div>
           </div>
-        ) : records.length === 0 && activeTab !== 'prices' && activeTab !== 'forecast' ? (
+        ) : records.length === 0 && activeTab !== 'prices' && activeTab !== 'forecast' && activeTab !== 'historical' ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 400, gap: 18, textAlign: 'center' }}>
             <div style={{ fontSize: 44 }}>⚡</div>
             <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20 }}>No data loaded</div>
@@ -454,7 +468,7 @@ export default function App() {
             </div>
           </div>
         ) : (
-          <ActiveTab records={records} selectedYears={selectedYears} dateRange={dateRange} stats={stats} {...(activeTab === 'prices' ? priceProps : {})} {...(activeTab === 'forecast' ? forecastProps : {})} />
+          <ActiveTab records={records} selectedYears={selectedYears} dateRange={dateRange} stats={stats} {...(activeTab === 'prices' ? priceProps : {})} {...(activeTab === 'forecast' ? forecastProps : {})} {...(activeTab === 'historical' ? historicalProps : {})} />
         )}
       </main>
 

@@ -97,24 +97,109 @@ const NEMTooltip = ({ active, payload, label }) => {
 };
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function TabForecast({ records = [], selectedYears = [2026], forecastData = null, forecastPoeData = null, forecastDate = null, onLoadForecast }) {
-  const [resolvedDate, setResolvedDate] = useState(forecastDate);
+export default function TabForecast({ records = [], selectedYears = [2026], forecastData = null, forecastPoeData = null, forecastDate = null, onLoadForecast, onForecastAutoLoaded }) {
+  const [resolvedDate,   setResolvedDate]   = useState(forecastDate);
+  const [autoFetching,   setAutoFetching]   = useState(false);
+  const [autoFetchDone,  setAutoFetchDone]  = useState(false);
+  const [autoFetchError, setAutoFetchError] = useState(null);
 
-  // Scan /data/ directory listing to find most recent dated forecast files
+  // Build a YYYYMMDD string for today minus N days
+  const dateStr = (daysAgo = 0) => {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    return [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')].join('');
+  };
+
+  // Parse forecast CSV text into rows + poeMap (mirrors App.jsx routeFile)
+  const parseForecastCsv = (text) => {
+    const lines   = text.trim().split(/\r?\n/).filter(Boolean);
+    const headers = lines[0].split(',').map(h => h.trim());
+    const rows = lines.slice(1).map(l => {
+      const vals = l.split(',');
+      const raw  = Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim() ?? '']));
+      const gpg_tj = parseFloat(raw.pred_gpg_tj) || 0;
+      let date = raw.date;
+      if (date && date.includes('/')) { const [d,m,y] = date.split('/'); date = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`; }
+      return {
+        date, period: raw.period,
+        pred_total:   parseFloat(raw.pred_total_tj)         || 0,
+        pred_gpg:     gpg_tj,
+        pred_nonpwr:  parseFloat(raw.pred_nonpower_tj)      || 0,
+        pred_vic:     parseFloat(raw.pred_vic_nonpower_tj)  || 0,
+        pred_nsw:     parseFloat(raw.pred_nsw_nonpower_tj)  || 0,
+        pred_sa:      parseFloat(raw.pred_sa_nonpower_tj)   || 0,
+        pred_tas:     parseFloat(raw.pred_tas_nonpower_tj)  || 0,
+        pred_nem:     parseFloat(raw.pred_nem_mwh)          || 0,
+        pred_wind:    parseFloat(raw.pred_wind_mwh)         || 0,
+        pred_solar:   parseFloat(raw.pred_solar_mwh)        || 0,
+        pred_hydro:   parseFloat(raw.pred_hydro_mwh)        || 0,
+        pred_coal:    parseFloat(raw.pred_coal_mwh)         || 0,
+        pred_gas_mwh: Math.round(gpg_tj * 1000 / 8.5),
+        actual_gpg_tj:          parseFloat(raw.actual_gpg_tj)         || null,
+        actual_nonpower_tj:     parseFloat(raw.actual_nonpower_tj)    || null,
+        actual_vic_nonpower_tj: parseFloat(raw.actual_vic_nonpower_tj)|| null,
+        actual_nsw_nonpower_tj: parseFloat(raw.actual_nsw_nonpower_tj)|| null,
+        actual_sa_nonpower_tj:  parseFloat(raw.actual_sa_nonpower_tj) || null,
+        actual_tas_nonpower_tj: parseFloat(raw.actual_tas_nonpower_tj)|| null,
+      };
+    });
+    const poeMap = {};
+    lines.slice(1).forEach(l => {
+      const vals = l.split(',');
+      const raw  = Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim() ?? '']));
+      if (!raw.date) return;
+      let pd = raw.date;
+      if (pd.includes('/')) { const [d,m,y] = pd.split('/'); pd = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`; }
+      const p10 = parseFloat(raw.poe10_total_tj ?? raw.p10_total_tj);
+      if (isNaN(p10)) return;
+      const p = v => { const n = parseFloat(v); return isNaN(n) ? null : n === 0 ? 0.1 : n; };
+      poeMap[pd] = {
+        p10_total:  p(raw.poe10_total_tj  ?? raw.p10_total_tj),
+        p90_total:  p(raw.poe90_total_tj  ?? raw.p90_total_tj),
+        p10_gpg:    p(raw.poe10_gpg_tj    ?? raw.p10_gpg_tj),
+        p90_gpg:    p(raw.poe90_gpg_tj    ?? raw.p90_gpg_tj),
+        p10_nonpwr: p(raw.poe10_nonpwr_tj ?? raw.p10_nonpwr_tj),
+        p90_nonpwr: p(raw.poe90_nonpwr_tj ?? raw.p90_nonpwr_tj),
+      };
+    });
+    return { rows, poeMap };
+  };
+
+  // Auto-fetch: try today then walk back up to 7 days
   useEffect(() => {
-    if (forecastDate) { setResolvedDate(forecastDate); return; }
-    fetch('/data/')
-      .then(r => r.ok ? r.json() : null)
-      .then(entries => {
-        if (!Array.isArray(entries)) return;
-        const dates = entries
-          .map(e => e.name?.match(/^gas_forecast_(\d{8})\.csv$/)?.[1])
-          .filter(Boolean)
-          .sort();
-        if (dates.length) setResolvedDate(dates[dates.length - 1]);
-      })
-      .catch(() => {});
-  }, [forecastDate]);
+    if (forecastData?.length || autoFetchDone) return;
+    let cancelled = false;
+    (async () => {
+      setAutoFetching(true);
+      setAutoFetchError(null);
+      for (let daysAgo = 0; daysAgo <= 7; daysAgo++) {
+        const ds  = dateStr(daysAgo);
+        const url = `/data/gas_forecast_${ds}.csv`;
+        try {
+          const r = await fetch(url);
+          if (!r.ok) continue;
+          const text = await r.text();
+          if (!text.trim().toLowerCase().startsWith('date')) continue; // HTML 404 guard
+          if (cancelled) return;
+          const { rows, poeMap } = parseForecastCsv(text);
+          if (rows.length) {
+            setResolvedDate(ds);
+            if (onForecastAutoLoaded) onForecastAutoLoaded(rows, Object.keys(poeMap).length ? poeMap : null);
+            setAutoFetching(false);
+            setAutoFetchDone(true);
+            return;
+          }
+        } catch { /* try next */ }
+      }
+      if (!cancelled) {
+        setAutoFetching(false);
+        setAutoFetchDone(true);
+        setAutoFetchError('No forecast file found in /data/ for the last 7 days.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [forecastData, autoFetchDone]);
+
 
   const resolvedForecast = forecastData ?? [];
   const resolvedPoe      = forecastPoeData ?? {};
@@ -169,51 +254,64 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
   const forecastStart = resolvedForecast.find(r => r.period === 'forecast')?.date;
   const latestDate = resolvedForecast[resolvedForecast.length - 1]?.date;
 
-  // ── Empty state (must be before todayRow which requires data) ─────────────────
+  // ── Empty / loading state ─────────────────────────────────────────────────────
   if (!resolvedForecast?.length) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 400, gap: 20, textAlign: 'center' }}>
-        <div style={{ fontSize: 40 }}>📈</div>
-        <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: 'var(--text)' }}>No forecast data loaded</div>
 
-        {/* File download links */}
-        <div style={{ background: 'var(--surface-2, #161b22)', border: '1px solid var(--border, #30363d)', borderRadius: 8, padding: '16px 24px', maxWidth: 480, width: '100%', textAlign: 'left' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontFamily: 'DM Mono, monospace' }}>Available data files</div>
-          {[
-            { label: 'Gas demand forecast', file: resolvedDate ? `gas_forecast_${resolvedDate}.csv` : 'gas_forecast_latest.csv' },
-          ].map(({ label, file }) => (
-            <div key={file} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border, #30363d)' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
-              <a href={`/data/${file}`} download style={{ fontSize: 12, fontFamily: 'DM Mono, monospace', color: '#39d0d8', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                ⬇ {file}
-              </a>
+        {/* Spinner while auto-fetching */}
+        {autoFetching ? (
+          <>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', border: '3px solid #30363d', borderTopColor: '#388bfd', animation: 'spin 0.8s linear infinite' }} />
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            <div style={{ fontFamily: 'DM Mono, monospace', color: '#8b949e', fontSize: 12 }}>
+              Looking for forecast file in /data/…
             </div>
-          ))}
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, fontFamily: 'DM Mono, monospace' }}>
-            Files updated daily · use ↑ Load forecasts below to upload
-          </div>
-        </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 40 }}>📈</div>
+            <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 18, color: 'var(--text)' }}>No forecast data loaded</div>
 
-        <label style={{
-          padding: '8px 20px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
-          fontFamily: 'Syne, sans-serif', fontWeight: 600,
-          border: '1px solid #bc8cff', background: '#bc8cff22', color: '#bc8cff',
-        }}>
-          ↑ Load forecasts
-          <input
-            type="file"
-            accept=".csv"
-            multiple
-            onChange={async e => {
-              const files = Array.from(e.target.files || []);
-              e.target.value = '';
-              for (const file of files) {
-                if (onLoadForecast) await onLoadForecast(file);
-              }
-            }}
-            style={{ display: 'none' }}
-          />
-        </label>
+            {/* Auto-fetch error or success hint */}
+            {autoFetchError ? (
+              <div style={{ background: '#f8514912', border: '1px solid #f8514944', borderRadius: 6, padding: '8px 16px', fontSize: 11, fontFamily: 'DM Mono, monospace', color: '#f85149', maxWidth: 460 }}>
+                ⚠ {autoFetchError}
+                <span style={{ color: '#8b949e' }}> — Upload a CSV file below, or copy it to the dashboard public/data/ folder.</span>
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: '#8b949e', fontFamily: 'DM Mono, monospace' }}>
+                Run the forecast notebook then upload the CSV, or copy it to <code style={{ color: '#e6edf3' }}>public/data/</code>
+              </div>
+            )}
+
+            {/* File path hint */}
+            <div style={{ fontSize: 11, color: '#8b949e', fontFamily: 'DM Mono, monospace' }}>
+              Expected: <span style={{ color: '#e6edf3' }}>C:\Users\peter\Python\data\forecasts\gas_forecast_YYYYMMDD.csv</span>
+            </div>
+
+            {/* Upload button */}
+            <label style={{
+              padding: '8px 20px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+              fontFamily: 'Syne, sans-serif', fontWeight: 600,
+              border: '1px solid #bc8cff', background: '#bc8cff22', color: '#bc8cff',
+            }}>
+              ↑ Upload forecast CSV
+              <input type="file" accept=".csv" multiple onChange={async e => {
+                const files = Array.from(e.target.files || []);
+                e.target.value = '';
+                for (const file of files) { if (onLoadForecast) await onLoadForecast(file); }
+              }} style={{ display: 'none' }} />
+            </label>
+
+            {/* Retry auto-fetch */}
+            <button onClick={() => setAutoFetchDone(false)} style={{
+              padding: '5px 14px', borderRadius: 5, cursor: 'pointer', fontSize: 12,
+              fontFamily: 'DM Mono, monospace', border: '1px solid #30363d',
+              background: 'transparent', color: '#8b949e',
+            }}>↻ Retry auto-fetch</button>
+          </>
+        )}
       </div>
     );
   }
@@ -370,14 +468,22 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
         </div>
       </div>
 
-      {/* Upload notice */}
+      {/* Update strip */}
       <div style={{
         background: 'rgba(56,139,253,0.06)', border: `1px solid rgba(56,139,253,0.2)`,
-        borderRadius: 6, padding: '8px 14px', fontSize: 12, color: C.muted,
-        display: 'flex', alignItems: 'center', gap: 8,
+        borderRadius: 6, padding: '7px 14px', fontSize: 12, color: C.muted,
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
       }}>
         <span style={{ color: C.blue }}>ℹ</span>
-        To update: use <strong style={{ color: C.text }}>↑ Load XLSX/CSV</strong> to upload a new forecast CSV file. Files named <code style={{ fontFamily: 'DM Mono, monospace', color: C.teal }}>gas_forecast_*.csv</code> and <code style={{ fontFamily: 'DM Mono, monospace', color: C.teal }}>gas_forecast_poe_*.csv</code> will be auto-detected.
+        <span>Loaded: <code style={{ fontFamily: 'DM Mono, monospace', color: C.teal }}>gas_forecast_{resolvedDate ?? '…'}.csv</code> — auto-fetched from <code style={{ fontFamily: 'DM Mono, monospace', color: C.teal }}>/data/</code></span>
+        <label style={{ marginLeft: 'auto', padding: '3px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontFamily: 'DM Mono, monospace', border: `1px solid ${C.border}`, background: 'transparent', color: C.muted }}>
+          ↑ Upload new CSV
+          <input type="file" accept=".csv" multiple onChange={async e => {
+            const files = Array.from(e.target.files || []);
+            e.target.value = '';
+            for (const file of files) { if (onLoadForecast) await onLoadForecast(file); }
+          }} style={{ display: 'none' }} />
+        </label>
       </div>
 
       {/* Row 1 — three main gas demand charts */}
