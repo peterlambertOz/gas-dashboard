@@ -78,30 +78,163 @@ const CustomTooltip = ({ active, payload, label, unit = 'TJ/day' }) => {
 
 const NEMTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
-  const total = payload.reduce((s, p) => s + (p.value || 0), 0);
+  // Merge residual_pos and residual_neg back into a single "Other incl BESS/oil" entry
+  const merged = [];
+  let otherVal = null;
+  let otherFill = null;
+  for (const p of [...payload].reverse()) {
+    if (p.name === '__hidden__') continue;
+    if (p.dataKey === 'residual_pos' || p.dataKey === 'residual_neg') {
+      otherVal = (otherVal ?? 0) + (p.value || 0);
+      otherFill = p.fill;
+    } else {
+      merged.push(p);
+    }
+  }
+  if (otherFill !== null) merged.push({ name: 'Other incl BESS/oil', value: otherVal, fill: otherFill, dataKey: 'other' });
+  const total = merged.reduce((s, p) => s + (p.value || 0), 0);
   return (
     <div style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
       <div style={{ color: C.muted, marginBottom: 6, fontFamily: 'DM Mono, monospace' }}>{label}</div>
-      {[...payload].reverse().map((p, i) => (
+      {merged.map((p, i) => (
         <div key={i} style={{ color: p.fill || C.text, display: 'flex', gap: 8, justifyContent: 'space-between' }}>
-          <span>{p.name}</span>
-          <span style={{ fontFamily: 'DM Mono, monospace' }}>{p.value.toFixed(0)} GWh</span>
+          <span>{p.name}{p.dataKey === 'other' && p.value < 0 ? ' (charging)' : ''}</span>
+          <span style={{ fontFamily: 'DM Mono, monospace' }}>{p.value.toFixed(1)} GWh</span>
         </div>
       ))}
       <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 6, paddingTop: 6, color: C.text, display: 'flex', gap: 8, justifyContent: 'space-between' }}>
         <span>Total</span>
-        <span style={{ fontFamily: 'DM Mono, monospace' }}>{total.toFixed(0)} GWh</span>
+        <span style={{ fontFamily: 'DM Mono, monospace' }}>{total.toFixed(1)} GWh</span>
       </div>
     </div>
   );
 };
 
+// ── NEM daily generation stack — top-level to prevent remount on parent re-render
+function NEMStackChart({ chartData, forecastStart }) {
+  const data = chartData.map(r => ({
+    label:    r.label,
+    coal:     Math.round(r.coal / 1000),
+    wind:     Math.round(r.wind / 1000),
+    solar:    Math.round(r.solar / 1000),
+    hydro:    Math.round(r.hydro / 1000),
+    gas:      Math.round(r.gas_mwh / 1000),
+    residual: Math.round(r.residual / 1000),
+  }));
+  return (
+    <ChartCard title="NEM Generation Stack — Daily Forecast" subtitle="GWh/day  ·  stacked area by source">
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid {...GRID} />
+          <XAxis dataKey="label" {...AXIS} interval={9} />
+          <YAxis {...AXIS} width={38} unit="" />
+          <Tooltip content={<NEMTooltip />} />
+          {forecastStart && <ReferenceLine x={fmtDate(forecastStart)} stroke={C.dim} strokeDasharray="4 3" label={{ value: 'Fcast →', fill: C.muted, fontSize: 10, position: 'insideTopRight' }} />}
+          <Area type="monotone" dataKey="coal"     stackId="nem" fill={C.coal}  stroke="none" name="Coal" />
+          <Area type="monotone" dataKey="wind"     stackId="nem" fill={C.wind}  stroke="none" name="Wind" />
+          <Area type="monotone" dataKey="solar"    stackId="nem" fill={C.solar} stroke="none" name="Solar" />
+          <Area type="monotone" dataKey="hydro"    stackId="nem" fill={C.hydro} stroke="none" name="Hydro" />
+          <Area type="monotone" dataKey="gas"      stackId="nem" fill={C.gas}   stroke="none" name="Gas" />
+          <Area type="monotone" dataKey="residual" stackId="nem" fill={C.other} stroke="none" name="Other incl BESS and oil" fillOpacity={0.8} />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11 }}>
+        {[['Coal',C.coal],['Wind',C.wind],['Solar',C.solar],['Hydro',C.hydro],['Gas',C.gas],['Other incl BESS/oil',C.other]].map(([label, color]) => (
+          <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, color: C.muted }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: color, display: 'inline-block' }}></span>
+            {label}
+          </span>
+        ))}
+      </div>
+    </ChartCard>
+  );
+}
+
+// ── Hourly dispatch chart — top-level so it doesn't remount on parent re-render
+function HourlyDispatchChart({ hourlyData, hourlyDay, setHourlyDay }) {
+  const source = hourlyData;
+  if (!source?.length) return null;
+
+  const dates = [...new Set(source.map(r => r.date))].sort();
+  const firstFcDate = source.find(r => r.period === 'forecast')?.date ?? dates[0];
+  const activeDay = hourlyDay ?? firstFcDate;
+
+  const dayData = useMemo(() => source
+    .filter(r => r.date === activeDay)
+    .sort((a, b) => parseInt(a.hour) - parseInt(b.hour))
+    .map(r => ({
+      hour:         parseInt(r.hour),
+      label:        `${String(parseInt(r.hour)).padStart(2,'0')}:00`,
+      coal:         Math.round(parseFloat(r.pred_coal_mwh)    / 100) / 10,
+      wind:         Math.round(parseFloat(r.pred_wind_mwh)    / 100) / 10,
+      solar:        Math.round(parseFloat(r.pred_solar_mwh)   / 100) / 10,
+      hydro:        Math.round(parseFloat(r.pred_hydro_mwh)   / 100) / 10,
+      gas:          Math.round(parseFloat(r.pred_gpg_mwh)     / 100) / 10,
+      residual_pos: Math.max(0, Math.round(parseFloat(r.pred_residual_mwh) / 100) / 10),
+      residual_neg: Math.min(0, Math.round(parseFloat(r.pred_residual_mwh) / 100) / 10),
+      period:       r.period,
+    })), [source, activeDay]);
+
+  if (!dayData.length) return null;
+
+  const isForecast = source.find(r => r.date === activeDay)?.period === 'forecast';
+
+  return (
+    <ChartCard
+      title="NEM Hourly Dispatch — Power Generation Mix"
+      subtitle={`GWh/hour · ${activeDay}${isForecast ? ' · forecast' : ' · backcast'}`}
+    >
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+        {dates.map(d => {
+          const isFc = source.find(r => r.date === d)?.period === 'forecast';
+          const active = (hourlyDay ?? firstFcDate) === d;
+          return (
+            <button key={d} onClick={() => setHourlyDay(d)} style={{
+              padding: '2px 8px', borderRadius: 4, fontSize: 10,
+              fontFamily: 'DM Mono, monospace', cursor: 'pointer',
+              border: `1px solid ${active ? (isFc ? C.blue : C.orange) : C.border}`,
+              background: active ? (isFc ? '#388bfd22' : '#e6a81722') : 'transparent',
+              color: active ? (isFc ? C.blue : C.orange) : C.muted,
+            }}>
+              {d.slice(5)}
+            </button>
+          );
+        })}
+      </div>
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={dayData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid {...GRID} />
+          <XAxis dataKey="label" {...AXIS} interval={2} />
+          <YAxis {...AXIS} width={38} unit="" />
+          <Tooltip content={<NEMTooltip />} />
+          <Area type="monotone" dataKey="coal"         stackId="h" fill={C.coal}  stroke="none" name="Coal" />
+          <Area type="monotone" dataKey="wind"         stackId="h" fill={C.wind}  stroke="none" name="Wind" />
+          <Area type="monotone" dataKey="solar"        stackId="h" fill={C.solar} stroke="none" name="Solar" />
+          <Area type="monotone" dataKey="hydro"        stackId="h" fill={C.hydro} stroke="none" name="Hydro" />
+          <Area type="monotone" dataKey="gas"          stackId="h" fill={C.gas}   stroke="none" name="Gas" />
+          <Area type="monotone" dataKey="residual_pos" stackId="h" fill={C.other} stroke="none" name="Other incl BESS/oil" fillOpacity={0.8} />
+          <Area type="monotone" dataKey="residual_neg" stackId="neg" fill={C.other} stroke="none" name="__hidden__" fillOpacity={0.5} />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11 }}>
+        {[['Coal',C.coal],['Wind',C.wind],['Solar',C.solar],['Hydro',C.hydro],['Gas',C.gas],['Other incl BESS/oil',C.other]].map(([label, color]) => (
+          <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, color: C.muted }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: color, display: 'inline-block' }} />
+            {label}
+          </span>
+        ))}
+      </div>
+    </ChartCard>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function TabForecast({ records = [], selectedYears = [2026], forecastData = null, forecastPoeData = null, forecastDate = null, onLoadForecast, onForecastAutoLoaded }) {
+export default function TabForecast({ records = [], selectedYears = [2026], forecastData = null, forecastPoeData = null, forecastDate = null, onLoadForecast, onForecastAutoLoaded, hourlyData = null }) {
   const [resolvedDate,   setResolvedDate]   = useState(forecastDate);
   const [autoFetching,   setAutoFetching]   = useState(false);
   const [autoFetchDone,  setAutoFetchDone]  = useState(false);
   const [autoFetchError, setAutoFetchError] = useState(null);
+  const [hourlyDay,      setHourlyDay]      = useState(null);
 
   // Build a YYYYMMDD string for today minus N days
   const dateStr = (daysAgo = 0) => {
@@ -112,7 +245,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
 
   // Parse forecast CSV text into rows + poeMap (mirrors App.jsx routeFile)
   const parseForecastCsv = (text) => {
-    const lines   = text.trim().split(/\r?\n/).filter(Boolean);
+    const lines   = text.trim().split('\n').map(l => l.endsWith('\r') ? l.slice(0,-1) : l).filter(Boolean);
     const headers = lines[0].split(',').map(h => h.trim());
     const rows = lines.slice(1).map(l => {
       const vals = l.split(',');
@@ -199,6 +332,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
     })();
     return () => { cancelled = true; };
   }, [forecastData, autoFetchDone]);
+
 
 
   const resolvedForecast = forecastData ?? [];
@@ -385,44 +519,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
   };
 
   // ── NEM stack chart ───────────────────────────────────────────────────────────
-  const NEMStackChart = () => {
-    const data = chartData.map(r => ({
-      label:    r.label,
-      coal:     Math.round(r.coal / 1000),   // → GWh
-      wind:     Math.round(r.wind / 1000),
-      solar:    Math.round(r.solar / 1000),
-      hydro:    Math.round(r.hydro / 1000),
-      gas:      Math.round(r.gas_mwh / 1000),
-      residual: Math.round(r.residual / 1000),
-    }));
-    return (
-      <ChartCard title="NEM Generation Stack — Daily Forecast" subtitle="GWh/day  ·  stacked area by source">
-        <ResponsiveContainer width="100%" height={220}>
-          <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid {...GRID} />
-            <XAxis dataKey="label" {...AXIS} interval={9} />
-            <YAxis {...AXIS} width={38} unit="" />
-            <Tooltip content={<NEMTooltip />} />
-            {forecastStart && <ReferenceLine x={fmtDate(forecastStart)} stroke={C.dim} strokeDasharray="4 3" label={{ value: 'Fcast →', fill: C.muted, fontSize: 10, position: 'insideTopRight' }} />}
-            <Area type="monotone" dataKey="coal"  stackId="nem" fill={C.coal}  stroke="none" name="Coal" />
-            <Area type="monotone" dataKey="wind"  stackId="nem" fill={C.wind}  stroke="none" name="Wind" />
-            <Area type="monotone" dataKey="solar" stackId="nem" fill={C.solar} stroke="none" name="Solar" />
-            <Area type="monotone" dataKey="hydro" stackId="nem" fill={C.hydro} stroke="none" name="Hydro" />
-            <Area type="monotone" dataKey="gas"   stackId="nem" fill={C.gas}   stroke="none" name="Gas" />
-            <Area type="monotone" dataKey="residual" stackId="nem" fill={C.other} stroke="none" name="Other incl BESS and oil" fillOpacity={0.8} />
-          </ComposedChart>
-        </ResponsiveContainer>
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11 }}>
-          {[['Coal', C.coal], ['Wind', C.wind], ['Solar', C.solar], ['Hydro', C.hydro], ['Gas', C.gas], ['Other incl BESS/oil', C.other]].map(([label, color]) => (
-            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, color: C.muted }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: color, display: 'inline-block' }}></span>
-              {label}
-            </span>
-          ))}
-        </div>
-      </ChartCard>
-    );
-  };
+
 
   // ── Header KPIs ──────────────────────────────────────────────────────────────
   // KPI strip: show today's forecast if available, else nearest date
@@ -521,7 +618,10 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
       </div>
 
       {/* Row 3 — NEM generation stack */}
-      <NEMStackChart />
+      <NEMStackChart chartData={chartData} forecastStart={forecastStart} />
+
+      {/* Row 4 — Hourly dispatch */}
+      <HourlyDispatchChart hourlyData={hourlyData} hourlyDay={hourlyDay} setHourlyDay={setHourlyDay} />
     </div>
   );
 }

@@ -56,6 +56,7 @@ export default function App() {
 
   // ── Forecast data state ────────────────────────────────────────────────────────
   const [forecastData,    setForecastData]    = useState(null);  // parsed main CSV rows
+  const [hourlyData,      setHourlyData]      = useState(null);  // hourly dispatch CSV rows
   const [forecastPoeData, setForecastPoeData] = useState(null);  // parsed POE CSV rows
 
   // ── Historical weather data state (Section 9 outputs) ────────────────────────
@@ -302,12 +303,35 @@ export default function App() {
   const ActiveTab = { demand: TabDailyDemand, forecast: TabForecast, historical: TabHistoricalWeather, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
   const priceProps      = { sttmData, dwgmWb, dwgmPrices, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
   const forecastProps   = {
-    forecastData, forecastPoeData, onLoadForecast: routeFile,
+    forecastData, forecastPoeData, hourlyData, onLoadForecast: routeFile,
     onForecastAutoLoaded: (rows, poeMap) => {
       setForecastData(rows);
       if (poeMap) setForecastPoeData(poeMap);
     },
   };
+  // ── Auto-fetch hourly forecast CSV ───────────────────────────────────────────
+  useEffect(() => {
+    if (hourlyData?.length) return;
+    const ds = (daysAgo = 0) => {
+      const d = new Date(); d.setDate(d.getDate() - daysAgo);
+      return [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')].join('');
+    };
+    (async () => {
+      for (let n = 0; n <= 7; n++) {
+        try {
+          const r = await fetch(`/data/gas_forecast_hourly_${ds(n)}.csv`);
+          if (!r.ok) continue;
+          const text = await r.text();
+          if (!text.trim().toLowerCase().startsWith('datetime')) continue;
+          const ls   = text.trim().split('\n').map(l => l.endsWith('\r') ? l.slice(0,-1) : l).filter(Boolean);
+          const hdrs = ls[0].split(',').map(h => h.trim());
+          const rows = ls.slice(1).map(l => { const v = l.split(','); return Object.fromEntries(hdrs.map((h,i) => [h,(v[i]||'').trim()])); });
+          if (rows.length) { setHourlyData(rows); return; }
+        } catch { /* try next */ }
+      }
+    })();
+  }, []);
+
   const historicalProps = { histPoe, histTraces, records };
 
   const btnBase = (color, active) => ({
@@ -331,14 +355,21 @@ export default function App() {
         position: 'sticky', top: 0, zIndex: 100,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: 7, flexShrink: 0,
-            background: 'linear-gradient(135deg, #e6a817 0%, #ff7b72 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
-          }}>⚡</div>
+          {/* Aber Analytics logo */}
+          <svg viewBox="0 0 385 370" fill="none" xmlns="http://www.w3.org/2000/svg"
+            style={{ width: 32, height: 32, flexShrink: 0 }}>
+            <circle cx="170" cy="186" r="163" fill="#52308B" stroke="white" strokeWidth="14"/>
+            <path d="M 370,186 C 218,187 78,133 13,49" stroke="white" strokeWidth="14" strokeLinecap="round"/>
+            <path d="M 370,186 C 218,185 78,239 13,323" stroke="white" strokeWidth="14" strokeLinecap="round"/>
+          </svg>
           <div>
-            <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 14, letterSpacing: '-0.02em' }}>
-              East Coast Gas Market Dashboard
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 14, letterSpacing: '-0.02em' }}>
+                East Coast Gas Market Dashboard
+              </div>
+              <div style={{ fontSize: 10, color: '#8b7dbf', fontFamily: 'Inter, sans-serif', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                Aber Analytics
+              </div>
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace' }}>
               AEMO GBB Actual Flow & Storage · SE States
@@ -451,7 +482,11 @@ export default function App() {
           </div>
         ) : records.length === 0 && activeTab !== 'prices' && activeTab !== 'forecast' && activeTab !== 'historical' ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 400, gap: 18, textAlign: 'center' }}>
-            <div style={{ fontSize: 44 }}>⚡</div>
+            <svg viewBox="0 0 385 370" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: 52, height: 52 }}>
+              <circle cx="170" cy="186" r="163" fill="#52308B" stroke="#30363d" strokeWidth="14"/>
+              <path d="M 370,186 C 218,187 78,133 13,49" stroke="#e6edf3" strokeWidth="14" strokeLinecap="round"/>
+              <path d="M 370,186 C 218,185 78,239 13,323" stroke="#e6edf3" strokeWidth="14" strokeLinecap="round"/>
+            </svg>
             <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 20 }}>No data loaded</div>
             <div style={{ color: 'var(--text-muted)', maxWidth: 380, lineHeight: 1.6, fontSize: 13 }}>
               Fetch live data from AEMO or load demo data to explore the dashboard.
