@@ -281,6 +281,258 @@ function FanTooltip({ active, payload, label, selectedYear, poeData, target }) {
   );
 }
 
+// ── POE fan chart tooltip ─────────────────────────────────────────────────────
+function PoeFanTooltip({ active, payload, label, displayYear, target, hasActuals }) {
+  if (!active || !payload?.length) return null;
+  const get = key => payload.find(p => p.dataKey === key)?.value ?? null;
+  const p10    = get('p10');
+  const p50    = get('p50');
+  const p90    = get('p90');
+  const actual = get('actual');
+  const approxDate = (() => {
+    const d = new Date(2001, 0, label);
+    return `${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
+  })();
+  const targetLabel = { total: 'Total', gpg: 'GPG', nonpower: 'Non-power' }[target] ?? target;
+  const lo = p90;
+  const hi = p10;
+  const mid = p50;
+  return (
+    <div style={{
+      background: '#0d1117', border: `1px solid ${C.border}`, borderRadius: 6,
+      padding: '10px 14px', fontSize: 11, fontFamily: 'DM Mono, monospace', minWidth: 220,
+    }}>
+      <div style={{ marginBottom: 8, color: '#fff', fontWeight: 600, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>
+        {displayYear} · {approxDate}
+        <span style={{ color: '#8b949e', fontWeight: 400 }}> (DOY {label})</span>
+      </div>
+      <div style={{ fontSize: 10, color: C.text, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        Model uncertainty — {targetLabel}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {hi != null && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ color: '#8b949e' }}>POE10 (high demand)</span>
+            <b style={{ color: '#ff7b72' }}>{fmt1(hi)} TJ</b>
+          </div>
+        )}
+        {mid != null && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ color: '#8b949e' }}>POE50 (central)</span>
+            <b style={{ color: '#388bfd' }}>{fmt1(mid)} TJ</b>
+          </div>
+        )}
+        {lo != null && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ color: '#8b949e' }}>POE90 (low demand)</span>
+            <b style={{ color: '#2ea870' }}>{fmt1(lo)} TJ</b>
+          </div>
+        )}
+        {hi != null && lo != null && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginTop: 2 }}>
+            <span style={{ color: '#8b949e' }}>P10–P90 spread</span>
+            <b style={{ color: C.text }}>{fmt1(hi - lo)} TJ</b>
+          </div>
+        )}
+        {actual != null && (
+          <>
+            <div style={{ borderTop: `1px solid ${C.border}`, margin: '4px 0' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+              <span style={{ color: '#8b949e' }}>Actual (GBB)</span>
+              <b style={{ color: '#e6a817' }}>{fmt1(actual)} TJ</b>
+            </div>
+            {mid != null && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+                <span style={{ color: '#8b949e' }}>vs POE50</span>
+                <b style={{ color: actual > mid ? '#ff7b72' : '#2ea870' }}>
+                  {actual > mid ? '+' : ''}{fmt1(actual - mid)} TJ
+                </b>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── POE fan chart ─────────────────────────────────────────────────────────────
+// Shows model uncertainty (P10/P50/P90) for the selected year's weather replay.
+// When no year is selected, falls back to the median year from year_stats.
+// For years 2019-2025, overlays actual GBB demand from the records prop.
+const ACTUALS_YEARS = new Set([2019, 2020, 2021, 2022, 2023, 2024, 2025]);
+
+function PoeFanChart({ tracesData, selectedYear, target, targetLabels, records = [] }) {
+  if (!tracesData?.years) return null;
+
+  // Resolve which year's trace to display
+  const yearStats = tracesData?.meta?.year_stats ?? [];
+
+  // Find median year by peak_total rank
+  const medianYear = (() => {
+    if (!yearStats.length) return null;
+    const sorted = [...yearStats].sort((a, b) => b.peak_total - a.peak_total);
+    return sorted[Math.floor(sorted.length / 2)]?.year ?? null;
+  })();
+
+  const displayYear = selectedYear ?? medianYear;
+  const daily = displayYear ? tracesData.years[String(displayYear)]?.daily : null;
+
+  if (!daily?.doy?.length) return null;
+
+  // Column names for this target
+  const cols = {
+    total:    { p50: 'pred_total_tj',    p10: 'poe10_total_tj',  p90: 'poe90_total_tj'  },
+    gpg:      { p50: 'pred_gpg_tj',      p10: 'poe10_gpg_tj',    p90: 'poe90_gpg_tj'    },
+    nonpower: { p50: 'pred_nonpower_tj', p10: 'poe10_nonpwr_tj', p90: 'poe90_nonpwr_tj' },
+  }[target] ?? { p50: 'pred_total_tj', p10: 'poe10_total_tj', p90: 'poe90_total_tj' };
+
+  // ── Interim scaling factors to achieve ~80% empirical coverage ───────────────
+  // Derived from 2019–2025 out-of-sample residuals vs the raw xplot bands.
+  // TODO: replace with empirical quantile offsets by DOY bin once notebook
+  //       cell is updated to compute and export them.
+  const SCALE = { total: 4.20, gpg: 2.64, nonpower: 10.00 };
+  const scale = SCALE[target] ?? 1;
+
+  // Build actuals-by-DOY from GBB records for this year, if available
+  const hasActuals = ACTUALS_YEARS.has(displayYear);
+  const actualsByDoy = (() => {
+    if (!hasActuals) return {};
+    const recs = records.filter(r => r.year === displayYear);
+    const m = {};
+    recs.forEach(r => {
+      if (!r.date) return;
+      const d = new Date(r.date);
+      const start = new Date(d.getFullYear(), 0, 0);
+      const doy = Math.floor((d - start) / 86400000);
+      if (doy < 1 || doy > 366) return;
+      let val;
+      if (target === 'gpg')           val = r.gpg_se;
+      else if (target === 'nonpower') val = (r.industrial ?? 0) + (r.residential ?? 0);
+      else                            val = r.total_demand_se;
+      if (val != null && !isNaN(val) && val > 0) m[doy] = val;
+    });
+    return m;
+  })();
+
+  const chartData = daily.doy.map((doy, i) => {
+    const p50 = daily[cols.p50]?.[i] ?? null;
+    const p10raw = daily[cols.p10]?.[i] ?? null;  // higher demand (raw)
+    const p90raw = daily[cols.p90]?.[i] ?? null;  // lower demand (raw)
+    let scaledLo = null, scaledHi = null, scaledP10 = null, scaledP90 = null;
+    if (p50 != null && p10raw != null && p90raw != null) {
+      // Expand half-band symmetrically around p50 by scale factor
+      const halfBandP10 = Math.abs(p10raw - p50) * scale;
+      const halfBandP90 = Math.abs(p90raw - p50) * scale;
+      scaledP10 = p50 + halfBandP10;          // scaled high-demand bound
+      scaledP90 = Math.max(0.1, p50 - halfBandP90); // scaled low-demand bound, floor at 0.1
+      scaledLo = scaledP90;
+      scaledHi = scaledP10;
+    }
+    return {
+      doy,
+      band: (scaledLo != null && scaledHi != null) ? [scaledLo, scaledHi] : null,
+      p50,
+      p10: scaledP10,
+      p90: scaledP90,
+      actual: actualsByDoy[doy] ?? null,
+    };
+  });
+
+  const isMedianFallback = !selectedYear && displayYear === medianYear;
+  const actualsCount = Object.keys(actualsByDoy).length;
+  const scalePct = ((scale - 1) * 100).toFixed(0);
+
+  return (
+    <Card>
+      <ChartTitle
+        title={`Model uncertainty range — ${targetLabels[target]}`}
+        sub={
+          `${displayYear} weather replay · shaded band = POE10–POE90 model uncertainty` +
+          (isMedianFallback ? ' · showing median year (select a year above to change)' : '') +
+          (hasActuals && actualsCount > 0 ? ` · ${actualsCount} days of GBB actuals` : '')
+        }
+      />
+
+      {/* Interim band notice */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10,
+        background: '#e6a81710', border: '1px solid #e6a81740',
+        borderRadius: 5, padding: '6px 10px',
+        fontSize: 10, fontFamily: 'DM Mono, monospace', color: '#e6a817', lineHeight: 1.5,
+      }}>
+        <span style={{ flexShrink: 0 }}>⚠</span>
+        <span>
+          <b>Interim bands:</b> raw xplot offsets scaled ×{scale.toFixed(2)} ({scalePct}% wider) to achieve ~80% empirical coverage
+          against 2019–2025 GBB actuals. To be replaced with empirical quantile offsets by DOY bin
+          once notebook recalibration is complete.
+        </span>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+        {[
+          { bg: '#388bfd28', stroke: '#388bfd66', label: 'POE10–POE90 range (model uncertainty)' },
+          { line: '#388bfd', label: 'POE50 (central forecast)' },
+          ...(hasActuals && actualsCount > 0 ? [{ dot: '#e6a817', label: `${displayYear} actual (GBB)` }] : []),
+        ].map(({ bg, stroke, line, dot, label }) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontFamily: 'DM Mono, monospace', color: C.text }}>
+            {dot
+              ? <div style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flexShrink: 0 }} />
+              : line
+              ? <div style={{ width: 24, height: 0, borderTop: `2px solid ${line}` }} />
+              : <div style={{ width: 16, height: 10, background: bg, border: `1px solid ${stroke}`, borderRadius: 2 }} />
+            }
+            {label}
+          </div>
+        ))}
+      </div>
+
+      <ResponsiveContainer width="100%" height={320}>
+        <ComposedChart data={chartData} margin={{ top: 4, right: 16, bottom: 4, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
+          <XAxis
+            dataKey="doy"
+            ticks={MONTH_TICKS}
+            tickFormatter={doy => MONTH_LABELS[MONTH_TICKS.indexOf(doy)] ?? ''}
+            tick={{ fill: C.text, fontSize: 11, fontFamily: 'DM Mono, monospace' }}
+            axisLine={{ stroke: C.grid }} tickLine={false}
+          />
+          <YAxis
+            tick={{ fill: C.text, fontSize: 11, fontFamily: 'DM Mono, monospace' }}
+            axisLine={false} tickLine={false} width={50}
+          />
+          <Tooltip content={<PoeFanTooltip displayYear={displayYear} target={target} hasActuals={hasActuals && actualsCount > 0} />} />
+
+          {/* POE10–POE90 shaded band — matching historic demand range style */}
+          <Area dataKey="band" stroke="#388bfd66" fill="#388bfd28" strokeWidth={1} legendType="none" />
+
+          {/* POE50 central forecast */}
+          <Line dataKey="p50" stroke="#388bfd" strokeWidth={2} dot={false} legendType="none" connectNulls />
+
+          {/* Actual GBB demand — yellow dots, for years 2019–2025 */}
+          {hasActuals && actualsCount > 0 && (
+            <Line
+              dataKey="actual"
+              stroke="none"
+              dot={{ r: 2.5, fill: '#e6a817', stroke: 'none' }}
+              activeDot={{ r: 4, fill: '#e6a817' }}
+              legendType="none"
+              connectNulls={false}
+              isAnimationActive={false}
+            />
+          )}
+
+          <ReferenceLine x={196} stroke={C.grid} strokeDasharray="4 4"
+            label={{ value: 'Winter', fill: C.text, fontSize: 10, fontFamily: 'DM Mono, monospace', position: 'insideTopRight' }} />
+          <ReferenceLine x={15} stroke={C.grid} strokeDasharray="4 4"
+            label={{ value: 'Summer', fill: C.text, fontSize: 10, fontFamily: 'DM Mono, monospace', position: 'insideTopRight' }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </Card>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function TabHistoricalWeather({ histPoe, histTraces, records = [] }) {
   const [selectedYear, setSelectedYear] = useState(null);
@@ -503,6 +755,15 @@ export default function TabHistoricalWeather({ histPoe, histTraces, records = []
           </ComposedChart>
         </ResponsiveContainer>
       </Card>
+
+      {/* ── POE fan chart ─────────────────────────────────────────────────── */}
+      <PoeFanChart
+        tracesData={tracesData}
+        selectedYear={selectedYear}
+        target={target}
+        targetLabels={targetLabels}
+        records={records}
+      />
 
       {/* ── Daily profile for selected year ───────────────────────────────── */}
       {selectedYear && (() => {
