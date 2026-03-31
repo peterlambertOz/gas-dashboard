@@ -282,21 +282,21 @@ function FanTooltip({ active, payload, label, selectedYear, poeData, target }) {
 }
 
 // ── POE fan chart tooltip ─────────────────────────────────────────────────────
-function PoeFanTooltip({ active, payload, label, displayYear, target, hasActuals }) {
+function PoeFanTooltip({ active, payload, label, displayYear, target, hasActuals, chartData }) {
   if (!active || !payload?.length) return null;
-  const get = key => payload.find(p => p.dataKey === key)?.value ?? null;
-  const p10    = get('p10');
-  const p50    = get('p50');
-  const p90    = get('p90');
+  // p50 and actual come from rendered series; p10/p90 are not rendered as
+  // individual lines so look them up directly from the chartData array by DOY
+  const get  = key => payload.find(p => p.dataKey === key)?.value ?? null;
+  const mid    = get('p50');
   const actual = get('actual');
+  const point  = chartData?.find(d => d.doy === label);
+  const hi     = point?.p10 ?? null;   // scaled POE10 (high demand)
+  const lo     = point?.p90 ?? null;   // scaled POE90 (low demand)
   const approxDate = (() => {
     const d = new Date(2001, 0, label);
     return `${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
   })();
   const targetLabel = { total: 'Total', gpg: 'GPG', nonpower: 'Non-power' }[target] ?? target;
-  const lo = p90;
-  const hi = p10;
-  const mid = p50;
   return (
     <div style={{
       background: '#0d1117', border: `1px solid ${C.border}`, borderRadius: 6,
@@ -502,7 +502,7 @@ function PoeFanChart({ tracesData, selectedYear, target, targetLabels, records =
             tick={{ fill: C.text, fontSize: 11, fontFamily: 'DM Mono, monospace' }}
             axisLine={false} tickLine={false} width={50}
           />
-          <Tooltip content={<PoeFanTooltip displayYear={displayYear} target={target} hasActuals={hasActuals && actualsCount > 0} />} />
+          <Tooltip content={<PoeFanTooltip displayYear={displayYear} target={target} hasActuals={hasActuals && actualsCount > 0} chartData={chartData} />} />
 
           {/* POE10–POE90 shaded band — matching historic demand range style */}
           <Area dataKey="band" stroke="#388bfd66" fill="#388bfd28" strokeWidth={1} legendType="none" />
