@@ -58,8 +58,8 @@ export default function TabStorage({ records, selectedYears, dateRange }) {
         // aemoParser convention: storage_iona = supply − demand (STOR rows)
         // positive → withdrawal (gas leaving storage, winter supply): show as positive green bar
         // negative → injection (gas entering storage, summer surplus): show as negative red bar
-        withdrawal: r.storage_iona > 0 ? r.storage_iona : 0,   // positive = withdrawal (winter)
-        injection:  r.storage_iona < 0 ? r.storage_iona : 0,   // negative = injection (summer)
+        withdrawal: r.storage_iona > 0 ? -r.storage_iona : 0,  // negative = withdrawal (bars down)
+        injection:  r.storage_iona < 0 ? -r.storage_iona : 0,  // positive = injection (bars up)
         balance: r.storage_balance_iona,
       }))
   , [records, latestYear, dateRange]);
@@ -138,7 +138,7 @@ export default function TabStorage({ records, selectedYears, dateRange }) {
       <ChartCard
         id="chart-storage-flows"
         title={`${latestYear} Iona Net Daily Flows`}
-        subtitle="Daily withdrawal (+, green) and injection (−, red) into/from storage (TJ/day)"
+        subtitle="Daily injection (+, green) and withdrawal (−, red) into/from storage (TJ/day)"
         onExportPPT={() => handleExportPPT('chart-storage-flows', `${latestYear} Iona Daily Flows`)}
         onExportXLSX={() => exportToExcel(records.filter(r => r.year === latestYear))}
       >
@@ -154,8 +154,8 @@ export default function TabStorage({ records, selectedYears, dateRange }) {
           </ComposedChart>
         </ResponsiveContainer>
         <Legend items={[
-          { color: '#3fb950', label: 'Withdrawal (TJ/day, positive = gas out of storage)' },
-          { color: '#f85149', label: 'Injection (TJ/day, negative = gas into storage)' },
+          { color: '#3fb950', label: 'Injection (TJ/day, positive = gas into storage)' },
+          { color: '#f85149', label: 'Withdrawal (TJ/day, negative = gas out of storage)' },
         ]} />
       </ChartCard>
 
