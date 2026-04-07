@@ -24,6 +24,48 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
     return Object.values(pivot).sort((a, b) => a.day - b.day);
   }, [records, selectedYears]);
 
+  // Longford hub range + individual year lines (mirrors Iona storage overlay pattern)
+  const longfordOverlay = useMemo(() => {
+    const pivot = {};
+    for (const r of records.filter(r => selectedYears.includes(r.year) && r.production_longford > 0)) {
+      if (!pivot[r.dayOfYear]) pivot[r.dayOfYear] = { day: r.dayOfYear, vals: [] };
+      pivot[r.dayOfYear].vals.push(r.production_longford);
+    }
+    const rangeMap = new Map(
+      Object.values(pivot).sort((a, b) => a.day - b.day).map(d => [d.day, {
+        day:      d.day,
+        rangeMin: Math.min(...d.vals),
+        rangeMax: Math.max(...d.vals),
+        rangeMid: Math.round(d.vals.reduce((a, b) => a + b, 0) / d.vals.length),
+      }])
+    );
+    for (const r of records.filter(r => selectedYears.includes(r.year) && r.production_longford > 0)) {
+      const entry = rangeMap.get(r.dayOfYear) || { day: r.dayOfYear };
+      entry[r.year] = r.production_longford;
+      rangeMap.set(r.dayOfYear, entry);
+    }
+    return Array.from(rangeMap.values()).sort((a, b) => a.day - b.day);
+  }, [records, selectedYears]);
+
+  // YTD Longford average — latestYear vs 2025, up to the latest available DOY in latestYear
+  const longfordYtdStats = useMemo(() => {
+    const latestRows = records
+      .filter(r => r.year === latestYear && r.production_longford > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (!latestRows.length) return null;
+    const maxDoy = latestRows[latestRows.length - 1].dayOfYear;
+    const latestDate = latestRows[latestRows.length - 1].date;
+    const ytdRows = latestRows.filter(r => r.dayOfYear <= maxDoy);
+    const ytdAvg = ytdRows.reduce((s, r) => s + r.production_longford, 0) / ytdRows.length;
+    // Same DOY range in 2025
+    const rows2025 = records.filter(r => r.year === 2025 && r.production_longford > 0 && r.dayOfYear <= maxDoy);
+    const avg2025 = rows2025.length
+      ? rows2025.reduce((s, r) => s + r.production_longford, 0) / rows2025.length
+      : null;
+    const delta = avg2025 != null ? ytdAvg - avg2025 : null;
+    return { ytdAvg: Math.round(ytdAvg), avg2025: avg2025 != null ? Math.round(avg2025) : null, delta: delta != null ? Math.round(delta) : null, maxDoy, latestDate };
+  }, [records, latestYear]);
+
   // Peak-day % of annual average by year
   const swingFactors = useMemo(() => {
     return selectedYears.map(y => {
@@ -116,6 +158,70 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
           </ComposedChart>
         </ResponsiveContainer>
         <Legend items={selectedYears.map(y => ({ color: YEAR_COLORS[y] || '#888', label: String(y) }))} />
+      </ChartCard>
+
+      {/* Longford YTD KPI strip */}
+      {longfordYtdStats && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          <KpiCard
+            label={`${latestYear} Longford YTD avg`}
+            value={longfordYtdStats.ytdAvg.toLocaleString()}
+            unit="TJ/day"
+            sub={`Jan 1 – ${longfordYtdStats.latestDate} (DOY ${longfordYtdStats.maxDoy})`}
+            color={CHART_COLORS.longford}
+          />
+          <KpiCard
+            label="2025 same-period avg"
+            value={longfordYtdStats.avg2025 != null ? longfordYtdStats.avg2025.toLocaleString() : '—'}
+            unit="TJ/day"
+            sub={`Jan 1 – DOY ${longfordYtdStats.maxDoy}`}
+            color="var(--text-muted)"
+          />
+          <KpiCard
+            label={`${latestYear} vs 2025 (YTD)`}
+            value={longfordYtdStats.delta != null ? `${longfordYtdStats.delta > 0 ? '+' : ''}${longfordYtdStats.delta.toLocaleString()}` : '—'}
+            unit="TJ/day"
+            sub={longfordYtdStats.delta != null && longfordYtdStats.avg2025
+              ? `${((longfordYtdStats.delta / longfordYtdStats.avg2025) * 100).toFixed(1)}% vs prior year`
+              : ''}
+            color={longfordYtdStats.delta == null ? 'var(--text-muted)' : longfordYtdStats.delta >= 0 ? 'var(--accent2)' : 'var(--danger)'}
+          />
+        </div>
+      )}
+
+      {/* Year-on-year Longford production with historic range */}
+      <ChartCard
+        id="chart-longford-yoy"
+        title="Year-on-Year Longford Production Comparison"
+        subtitle="Daily Longford hub supply (TJ/day) with selected-year range shading and individual year lines"
+        onExportPPT={() => handleExportPPT('chart-longford-yoy', 'Year-on-Year Longford Production')}
+        onExportXLSX={() => exportToExcel(records.filter(r => selectedYears.includes(r.year) && r.production_longford > 0))}
+      >
+        <ResponsiveContainer width="100%" height={300}>
+          <ComposedChart data={longfordOverlay} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
+            <CartesianGrid {...GRID_STYLE} />
+            <XAxis dataKey="day" tickFormatter={dayLabel} ticks={[1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]} {...AXIS_STYLE} />
+            <YAxis {...AXIS_STYLE} tickFormatter={v => `${v.toLocaleString()}`} />
+            <Tooltip content={<CustomTooltip formatter={(v) => `${Math.round(v).toLocaleString()} TJ`} labelFormatter={fmtDate} />} />
+            {/* Historic range shading */}
+            {selectedYears.length > 1 && (
+              <Area dataKey="rangeMax" name="Hist. max" fill={CHART_COLORS.longford} stroke="none" fillOpacity={0.12} />
+            )}
+            {selectedYears.length > 1 && (
+              <Area dataKey="rangeMin" name="Hist. min" fill={CHART_COLORS.longford} stroke="none" fillOpacity={0.12} />
+            )}
+            <Line type="monotone" dataKey="rangeMid" name="Avg" stroke={CHART_COLORS.longford} strokeWidth={1.5} strokeDasharray="5 3" dot={false} />
+            {/* Individual year lines */}
+            {selectedYears.map(y => (
+              <Line key={y} type="monotone" dataKey={y} name={String(y)}
+                stroke={YEAR_COLORS[y] || '#888'} strokeWidth={y === latestYear ? 2.5 : 1.5} dot={false} connectNulls />
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
+        <Legend items={[
+          { color: CHART_COLORS.longford, label: 'Selected year range & average' },
+          ...selectedYears.map(y => ({ color: YEAR_COLORS[y] || '#888', label: String(y) })),
+        ]} />
       </ChartCard>
 
       {/* Year selector for source breakdown charts */}

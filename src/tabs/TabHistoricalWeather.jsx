@@ -387,13 +387,6 @@ function PoeFanChart({ tracesData, selectedYear, target, targetLabels, records =
     nonpower: { p50: 'pred_nonpower_tj', p10: 'poe10_nonpwr_tj', p90: 'poe90_nonpwr_tj' },
   }[target] ?? { p50: 'pred_total_tj', p10: 'poe10_total_tj', p90: 'poe90_total_tj' };
 
-  // ── Interim scaling factors to achieve ~80% empirical coverage ───────────────
-  // Derived from 2019–2025 out-of-sample residuals vs the raw xplot bands.
-  // TODO: replace with empirical quantile offsets by DOY bin once notebook
-  //       cell is updated to compute and export them.
-  const SCALE = { total: 4.20, gpg: 2.64, nonpower: 10.00 };
-  const scale = SCALE[target] ?? 1;
-
   // Build actuals-by-DOY from GBB records for this year, if available
   const hasActuals = ACTUALS_YEARS.has(displayYear);
   const actualsByDoy = (() => {
@@ -416,32 +409,27 @@ function PoeFanChart({ tracesData, selectedYear, target, targetLabels, records =
   })();
 
   const chartData = daily.doy.map((doy, i) => {
-    const p50 = daily[cols.p50]?.[i] ?? null;
-    const p10raw = daily[cols.p10]?.[i] ?? null;  // higher demand (raw)
-    const p90raw = daily[cols.p90]?.[i] ?? null;  // lower demand (raw)
-    let scaledLo = null, scaledHi = null, scaledP10 = null, scaledP90 = null;
-    if (p50 != null && p10raw != null && p90raw != null) {
-      // Expand half-band symmetrically around p50 by scale factor
-      const halfBandP10 = Math.abs(p10raw - p50) * scale;
-      const halfBandP90 = Math.abs(p90raw - p50) * scale;
-      scaledP10 = p50 + halfBandP10;          // scaled high-demand bound
-      scaledP90 = Math.max(0.1, p50 - halfBandP90); // scaled low-demand bound, floor at 0.1
-      scaledLo = scaledP90;
-      scaledHi = scaledP10;
-    }
+    const p50    = daily[cols.p50]?.[i] ?? null;
+    const p10val = daily[cols.p10]?.[i] ?? null;   // empirical POE10 (high demand)
+    const p90val = daily[cols.p90]?.[i] ?? null;   // empirical POE90 (low demand)
+    // Floor the lower bound at 0.1 so Recharts doesn't treat zero as absent
+    const lo = (p90val != null) ? Math.max(0.1, p90val) : null;
+    const hi = p10val;
     return {
       doy,
-      band: (scaledLo != null && scaledHi != null) ? [scaledLo, scaledHi] : null,
+      band:   (lo != null && hi != null) ? [lo, hi] : null,
       p50,
-      p10: scaledP10,
-      p90: scaledP90,
+      p10:    hi,
+      p90:    lo,
       actual: actualsByDoy[doy] ?? null,
     };
   });
 
   const isMedianFallback = !selectedYear && displayYear === medianYear;
   const actualsCount = Object.keys(actualsByDoy).length;
-  const scalePct = ((scale - 1) * 100).toFixed(0);
+  // Check metadata to know which method generated the bands
+  const bandSource = tracesData?.meta?.model_uncertainty_source ?? 'crossplot_residuals_h0';
+  const isEmpiricalBand = bandSource === 'empirical_quantile_by_doy_bin';
 
   return (
     <Card>
@@ -454,18 +442,23 @@ function PoeFanChart({ tracesData, selectedYear, target, targetLabels, records =
         }
       />
 
-      {/* Interim band notice */}
+      {/* Band provenance notice */}
       <div style={{
         display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10,
-        background: '#e6a81710', border: '1px solid #e6a81740',
+        background: isEmpiricalBand ? '#3fb95010' : '#e6a81710',
+        border: `1px solid ${isEmpiricalBand ? '#3fb95040' : '#e6a81740'}`,
         borderRadius: 5, padding: '6px 10px',
-        fontSize: 10, fontFamily: 'DM Mono, monospace', color: '#e6a817', lineHeight: 1.5,
+        fontSize: 10, fontFamily: 'DM Mono, monospace',
+        color: isEmpiricalBand ? '#3fb950' : '#e6a817', lineHeight: 1.5,
       }}>
-        <span style={{ flexShrink: 0 }}>⚠</span>
+        <span style={{ flexShrink: 0 }}>{isEmpiricalBand ? 'ℹ' : '⚠'}</span>
         <span>
-          <b>Interim bands:</b> raw xplot offsets scaled ×{scale.toFixed(2)} ({scalePct}% wider) to achieve ~80% empirical coverage
-          against 2019–2025 GBB actuals. To be replaced with empirical quantile offsets by DOY bin
-          once notebook recalibration is complete.
+          {isEmpiricalBand
+            ? <><b>Empirical bands:</b> POE10/POE90 derived from (actual − P50) residuals for 2019–2025,
+                binned by DOY in a ±15-day rolling window and Gaussian-smoothed. Target ~80% coverage.</>
+            : <><b>Note:</b> bands use the original sinusoidal xplot method — run notebook cell 9f to
+                replace with empirical quantile offsets calibrated to 2019–2025 GBB actuals.</>
+          }
         </span>
       </div>
 
