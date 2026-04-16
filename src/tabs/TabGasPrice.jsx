@@ -47,6 +47,11 @@ function dayLabel(day) {
   return MONTH_LABELS[d.getMonth()];
 }
 
+function dayToFullLabel(day) {
+  const d = new Date(2024, 0, day);
+  return `${d.getDate()} ${MONTH_LABELS[d.getMonth()]}`;
+}
+
 function toDateStr(val) {
   // Excel serial number or JS Date → YYYY-MM-DD
   if (!val) return null;
@@ -314,7 +319,7 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
 
   // ── Derived chart data ────────────────────────────────────────────────────────
   const availableYears = useMemo(() =>
-    [...new Set(priceRecords.map(r => r.year))].sort()
+    [...new Set(priceRecords.map(r => r.year))].filter(y => !isNaN(y)).sort()
   , [priceRecords]);
 
   // YoY pivot per hub — one row per dayOfYear, columns = years
@@ -525,7 +530,7 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
                 <Tooltip content={
                   <CustomTooltip
                     formatter={v => `$${Number(v).toFixed(2)}/GJ`}
-                    labelFormatter={dayLabel}
+                    labelFormatter={dayToFullLabel}
                   />
                 } />
                 {selectedYears.map(y => (
@@ -550,14 +555,17 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
         onExportPPT={() => exportToPowerPoint([{ id: 'chart-price-spread', title: 'Gas Hub Price Spread' }])}
       >
         {/* Year selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace' }}>Year:</span>
           {availableYears.map(y => (
             <button key={y} onClick={() => setSpreadYear(y)} style={btnStyle(spreadYear === y, YEAR_COLORS[y] || '#888')}>
               {y}
             </button>
           ))}
-          <span style={{ marginLeft: 12, fontSize: 12, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace' }}>Show:</span>
+        </div>
+        {/* Hub toggles */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace' }}>Show:</span>
           {Object.keys(HUB_META).map(hub => (
             <button key={hub}
               onClick={() => setVisibleHubs(prev => ({ ...prev, [hub]: !prev[hub] }))}
@@ -585,38 +593,6 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
         <Legend items={Object.entries(HUB_META)
           .filter(([hub]) => visibleHubs[hub])
           .map(([, m]) => ({ color: m.color, label: m.fullLabel }))} />
-      </ChartCard>
-
-      {/* ── Price spike counter ──────────────────────────────────────────────── */}
-      <ChartCard
-        id="chart-price-spikes"
-        title="High-Price Days by Year"
-        subtitle={`Number of days each hub exceeded the threshold ($/GJ)`}
-        onExportPPT={() => exportToPowerPoint([{ id: 'chart-price-spikes', title: 'Gas Price Spike Frequency' }])}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace' }}>Threshold:</span>
-          {SPIKE_THRESHOLDS.map(t => (
-            <button key={t} onClick={() => setSpikeThreshold(t)} style={btnStyle(spikeThreshold === t, '#ffa657')}>
-              ${t}/GJ
-            </button>
-          ))}
-        </div>
-
-        <ResponsiveContainer width="100%" height={240}>
-          <ComposedChart data={spikeData} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
-            <CartesianGrid {...GRID_STYLE} />
-            <XAxis dataKey="year" {...AXIS_STYLE} />
-            <YAxis {...AXIS_STYLE} tickFormatter={v => `${v}d`} />
-            <Tooltip content={
-              <CustomTooltip formatter={(v, name) => `${v} days`} />
-            } />
-            {Object.entries(HUB_META).map(([hub, m]) => (
-              <Bar key={hub} dataKey={hub} name={m.label} fill={m.color} fillOpacity={0.8} stackId="a" />
-            ))}
-          </ComposedChart>
-        </ResponsiveContainer>
-        <Legend items={Object.entries(HUB_META).map(([, m]) => ({ color: m.color, label: m.label }))} />
       </ChartCard>
 
       {/* ── DWGM price vs demand overlay ────────────────────────────────────── */}
@@ -654,6 +630,38 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
           ]} />
         </ChartCard>
       )}
+
+      {/* ── Price spike counter ──────────────────────────────────────────────── */}
+      <ChartCard
+        id="chart-price-spikes"
+        title="High-Price Days by Year"
+        subtitle={`Number of days each hub exceeded the threshold ($/GJ)`}
+        onExportPPT={() => exportToPowerPoint([{ id: 'chart-price-spikes', title: 'Gas Price Spike Frequency' }])}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace' }}>Threshold:</span>
+          {SPIKE_THRESHOLDS.map(t => (
+            <button key={t} onClick={() => setSpikeThreshold(t)} style={btnStyle(spikeThreshold === t, '#ffa657')}>
+              ${t}/GJ
+            </button>
+          ))}
+        </div>
+
+        <ResponsiveContainer width="100%" height={240}>
+          <ComposedChart data={spikeData} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+            <CartesianGrid {...GRID_STYLE} />
+            <XAxis dataKey="year" {...AXIS_STYLE} />
+            <YAxis {...AXIS_STYLE} tickFormatter={v => `${v}d`} />
+            <Tooltip content={
+              <CustomTooltip formatter={(v, name) => `${v} days`} />
+            } />
+            {Object.entries(HUB_META).map(([hub, m]) => (
+              <Bar key={hub} dataKey={hub} name={m.label} fill={m.color} fillOpacity={0.8} stackId="a" />
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
+        <Legend items={Object.entries(HUB_META).map(([, m]) => ({ color: m.color, label: m.label }))} />
+      </ChartCard>
 
     </div>
   );

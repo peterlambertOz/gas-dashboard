@@ -149,8 +149,8 @@ export default function TabStorage({ records, selectedYears, dateRange }) {
             <YAxis {...AXIS_STYLE} />
             <Tooltip content={<CustomTooltip formatter={(v) => `${Math.round(v).toLocaleString()} TJ`}  labelFormatter={fmtDate} /> } />
             <ReferenceLine y={0} stroke="var(--border)" strokeWidth={1.5} />
-            <Bar dataKey="withdrawal" name="Withdrawal" fill="#3fb950" maxBarSize={6} />
-            <Bar dataKey="injection"  name="Injection"  fill="#f85149" maxBarSize={6} />
+            <Bar dataKey="withdrawal" name="Withdrawal" fill="#f85149" maxBarSize={6} />
+            <Bar dataKey="injection"  name="Injection"  fill="#3fb950" maxBarSize={6} />
           </ComposedChart>
         </ResponsiveContainer>
         <Legend items={[
