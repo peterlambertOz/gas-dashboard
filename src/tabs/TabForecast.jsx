@@ -5,6 +5,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
   ReferenceArea
 } from "recharts";
+import { fetchGBBNominations, parseGBBNominations } from '../utils/aemoParser';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const fmtDate = (d) => {
@@ -196,7 +197,7 @@ function HourlyDispatchChart({ hourlyData, hourlyDay, setHourlyDay }) {
               background: active ? (isFc ? '#388bfd22' : '#e6a81722') : 'transparent',
               color: active ? (isFc ? C.blue : C.orange) : C.muted,
             }}>
-              {d.slice(5)}
+              {d.slice(8)}/{d.slice(5,7)}
             </button>
           );
         })}
@@ -235,6 +236,12 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
   const [autoFetchDone,  setAutoFetchDone]  = useState(false);
   const [autoFetchError, setAutoFetchError] = useState(null);
   const [hourlyDay,      setHourlyDay]      = useState(null);
+
+  // GBB Nomination state
+  const [gbbNomData,      setGbbNomData]      = useState(null);   // parsed nomination rows
+  const [gbbNomFetching,  setGbbNomFetching]  = useState(false);
+  const [gbbNomError,     setGbbNomError]     = useState(null);
+  const [gbbNomLastFetch, setGbbNomLastFetch] = useState(null);
 
   // Build a YYYYMMDD string for today minus N days
   const dateStr = (daysAgo = 0) => {
@@ -340,6 +347,46 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
 
   // Build chart data
   // Build date-keyed lookup from GBB records for actuals
+  // ── GBB Nomination fetch ──────────────────────────────────────────────────────
+  const handleFetchGBBNom = async () => {
+    setGbbNomFetching(true);
+    setGbbNomError(null);
+    try {
+      const rows = await fetchGBBNominations((msg) => console.log('[GBB Nom]', msg));
+      setGbbNomData(rows);
+      setGbbNomLastFetch(new Date().toISOString());
+    } catch (e) {
+      setGbbNomError(e.message);
+    } finally {
+      setGbbNomFetching(false);
+    }
+  };
+
+  const handleUploadGBBNom = async (file) => {
+    setGbbNomFetching(true);
+    setGbbNomError(null);
+    try {
+      const text = await file.text();
+      const Papa = (await import('papaparse')).default;
+      const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, transformHeader: h => h.trim() });
+      const rows = parseGBBNominations(parsed.data);
+      setGbbNomData(rows);
+      setGbbNomLastFetch(new Date().toISOString());
+    } catch (e) {
+      setGbbNomError(e.message);
+    } finally {
+      setGbbNomFetching(false);
+    }
+  };
+
+  // Lookup nominations by date
+  const gbbNomByDate = useMemo(() => {
+    if (!gbbNomData) return {};
+    const m = {};
+    for (const r of gbbNomData) m[r.date] = r;
+    return m;
+  }, [gbbNomData]);
+
   const gbbByDate = useMemo(() => {
     const m = {};
     for (const r of records) {
@@ -352,6 +399,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
     return resolvedForecast.map(r => {
       const poe = resolvedPoe[r.date];
       const gbb = gbbByDate[r.date];
+      const nom = gbbNomByDate[r.date];
       // Actuals from GBB records where available
       const actual_total  = gbb ? Math.round(gbb.total_demand_se * 10) / 10 : null;
       const actual_gpg    = gbb ? Math.round(gbb.gpg_se          * 10) / 10 : null;
@@ -367,6 +415,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
         label: fmtDate(r.date),
         actual_total, actual_gpg, actual_nonpwr,
         actual_vic, actual_nsw, actual_sa, actual_tas,
+        // GBB nomination supply total
+        gbb_nom: nom ? nom.gbb_se_total : null,
         // POE band: PoE90 = floor (lower value), PoE10 = ceiling (higher value)
         poe_total_lo:  poe ? poe.p90_total  : null,
         poe_total_hi:  poe ? poe.p10_total  : null,
@@ -383,7 +433,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
         residual,
       };
     });
-  }, [resolvedForecast, resolvedPoe, gbbByDate]);
+  }, [resolvedForecast, resolvedPoe, gbbByDate, gbbNomByDate]);
 
   const forecastStart = resolvedForecast.find(r => r.period === 'forecast')?.date;
   const latestDate = resolvedForecast[resolvedForecast.length - 1]?.date;
@@ -536,6 +586,274 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
       , resolvedForecast[resolvedForecast.length - 1]);
   const poeLatest = todayRow ? resolvedPoe[todayRow.date] ?? null : null;
 
+  // ── GBB Nomination comparison chart ──────────────────────────────────────────
+  const GBBNomChart = () => {
+    const data = chartData.map(r => ({
+      label:    r.label,
+      date:     r.date,
+      forecast: r.pred_total,
+      actual:   r.actual_total,
+      gbb_nom:  r.gbb_nom,
+      poe_lo:   r.poe_total_lo,
+      poe_hi:   r.poe_total_hi,
+      poe_band: (r.poe_total_lo != null && r.poe_total_hi != null) ? [r.poe_total_lo, r.poe_total_hi] : null,
+    }));
+
+    const hasNom = data.some(r => r.gbb_nom != null);
+
+    // Pearson correlation — only backcast rows where both series have actuals
+    const pearson = (xs, ys) => {
+      const n = xs.length;
+      if (n < 3) return null;
+      const mx = xs.reduce((a, b) => a + b, 0) / n;
+      const my = ys.reduce((a, b) => a + b, 0) / n;
+      const num = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0);
+      const den = Math.sqrt(
+        xs.reduce((s, x) => s + (x - mx) ** 2, 0) *
+        ys.reduce((s, y) => s + (y - my) ** 2, 0)
+      );
+      return den === 0 ? null : num / den;
+    };
+
+    const baccastWithActual = data.filter(r =>
+      r.actual != null && r.actual > 0 && r.forecast != null
+    );
+    const rForecast = pearson(
+      baccastWithActual.map(r => r.forecast),
+      baccastWithActual.map(r => r.actual)
+    );
+    const nomPairs = data.filter(r =>
+      r.actual != null && r.actual > 0 && r.gbb_nom != null
+    );
+    const rNom = pearson(
+      nomPairs.map(r => r.gbb_nom),
+      nomPairs.map(r => r.actual)
+    );
+
+    const fmtR = (r) => r != null ? r.toFixed(3) : '—';
+    const rColor = (r) => r == null ? C.muted : r > 0.75 ? C.green : r > 0.5 ? C.orange : C.red;
+
+    return (
+      <ChartCard
+        title="Total SE Demand — Dashboard Forecast vs GBB Nominations"
+        subtitle="Dashboard P50 + POE band · GBB supply-side nomination total · GBB actuals (TJ/day)"
+      >
+        {/* Fetch / upload controls */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+          <button
+            onClick={handleFetchGBBNom}
+            disabled={gbbNomFetching}
+            style={{
+              padding: '4px 12px', borderRadius: 5, cursor: gbbNomFetching ? 'not-allowed' : 'pointer',
+              fontSize: 11, fontFamily: 'DM Mono, monospace',
+              border: `1px solid ${C.green}`, background: gbbNomFetching ? C.surface : `${C.green}22`,
+              color: gbbNomFetching ? C.muted : C.green, opacity: gbbNomFetching ? 0.6 : 1,
+            }}
+          >
+            {gbbNomFetching ? '⟳ Fetching…' : '↓ Fetch latest AEMO nominations'}
+          </button>
+          <label style={{
+            padding: '4px 12px', borderRadius: 5, cursor: 'pointer', fontSize: 11,
+            fontFamily: 'DM Mono, monospace', border: `1px solid ${C.border}`,
+            background: 'transparent', color: C.muted,
+          }}>
+            ↑ Upload ZIP / CSV
+            <input type="file" accept=".zip,.csv,.CSV" style={{ display: 'none' }}
+              onChange={async e => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (!file) return;
+                if (file.name.toLowerCase().endsWith('.zip')) {
+                  setGbbNomFetching(true);
+                  setGbbNomError(null);
+                  try {
+                    const JSZip = (await import('jszip')).default;
+                    const Papa  = (await import('papaparse')).default;
+                    const buf   = await file.arrayBuffer();
+                    const zip   = await JSZip.loadAsync(buf);
+                    const csvFiles = Object.keys(zip.files).filter(f => f.toLowerCase().endsWith('.csv'));
+                    let allRows = [];
+                    for (const fn of csvFiles) {
+                      const text   = await zip.files[fn].async('string');
+                      const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, transformHeader: h => h.trim() });
+                      allRows = allRows.concat(parsed.data);
+                    }
+                    setGbbNomData(parseGBBNominations(allRows));
+                    setGbbNomLastFetch(new Date().toISOString());
+                  } catch (err) {
+                    setGbbNomError(err.message);
+                  } finally {
+                    setGbbNomFetching(false);
+                  }
+                } else {
+                  await handleUploadGBBNom(file);
+                }
+              }}
+            />
+          </label>
+          {gbbNomLastFetch && (
+            <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Mono, monospace' }}>
+              loaded {new Date(gbbNomLastFetch).toLocaleTimeString()} · {gbbNomData?.length ?? 0} days
+            </span>
+          )}
+          {gbbNomError && (
+            <span style={{ fontSize: 10, color: C.red, fontFamily: 'DM Mono, monospace', maxWidth: 360 }}>
+              ⚠ {gbbNomError}
+            </span>
+          )}
+        </div>
+
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid {...GRID} />
+            <XAxis dataKey="label" {...AXIS} interval={9} />
+            <YAxis {...AXIS} width={38} domain={['auto', 'auto']} />
+            <Tooltip content={<CustomTooltip unit="TJ/day" />} />
+            {/* POE band */}
+            <Area type="monotone" dataKey="poe_band" stroke="none" fill={C.blue} fillOpacity={0.2} legendType="none" name="__hidden__" />
+            <Line dataKey="poe_lo" stroke={C.blue} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 90" connectNulls />
+            <Line dataKey="poe_hi" stroke={C.blue} strokeWidth={1} strokeDasharray="3 3" dot={false} name="PoE 10" connectNulls />
+            {/* Dashboard forecast P50 */}
+            <Line dataKey="forecast" stroke={C.blue} strokeWidth={2} dot={false} name="Forecast P50" connectNulls />
+            {/* GBB nomination line — only rendered when data present */}
+            {hasNom && (
+              <Line dataKey="gbb_nom" stroke={C.green} strokeWidth={1.5} strokeDasharray="6 3"
+                dot={false} name="GBB nomination" connectNulls />
+            )}
+            {/* Actuals */}
+            <Line dataKey="actual" stroke={C.actual} strokeWidth={0}
+              dot={{ r: 2.5, fill: C.actual }} name="Actual (GBB)" connectNulls />
+            {forecastStart && (
+              <ReferenceLine x={fmtDate(forecastStart)} stroke={C.dim} strokeDasharray="4 3"
+                label={{ value: 'Fcast →', fill: C.muted, fontSize: 10, position: 'insideTopRight' }} />
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
+
+        <div style={{ display: 'flex', gap: 16, fontSize: 11, color: C.muted, flexWrap: 'wrap' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 16, height: 8, background: C.blue, opacity: 0.2, display: 'inline-block', borderRadius: 2 }} />
+            PoE 10–90
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 16, height: 2, background: C.blue, display: 'inline-block' }} />
+            Dashboard P50
+          </span>
+          {hasNom && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 16, height: 0, borderTop: `2px dashed ${C.green}`, display: 'inline-block' }} />
+              GBB nomination
+            </span>
+          )}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.actual, display: 'inline-block' }} />
+            Actual (GBB)
+          </span>
+          {!hasNom && (
+            <span style={{ color: C.dim, fontStyle: 'italic' }}>
+              ↑ fetch or upload AEMO nominations to add GBB comparison line
+            </span>
+          )}
+        </div>
+
+        {/* Correlation stats strip */}
+        <div style={{
+          display: 'flex', gap: 0, borderTop: `1px solid ${C.border}`,
+          paddingTop: 10, marginTop: 2, flexWrap: 'wrap',
+        }}>
+          {/* P50 vs Actual */}
+          <div style={{ flex: '1 1 200px', paddingRight: 20 }}>
+            <div style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Mono, monospace', marginBottom: 3 }}>
+              P50 vs Actual ({baccastWithActual.length} days)
+            </div>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 10, color: C.muted }}>r =</span>
+              <span style={{
+                fontFamily: 'DM Mono, monospace', fontSize: 16, fontWeight: 700,
+                color: rColor(rForecast),
+              }}>{fmtR(rForecast)}</span>
+              {rForecast != null && (
+                <span style={{ fontSize: 10, color: C.muted }}>
+                  r² = {(rForecast ** 2).toFixed(3)}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div style={{ width: 1, background: C.border, margin: '0 4px', alignSelf: 'stretch', minHeight: 36 }} />
+
+          {/* GBB Nom vs Actual */}
+          <div style={{ flex: '1 1 200px', paddingLeft: 20 }}>
+            <div style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Mono, monospace', marginBottom: 3 }}>
+              {hasNom ? `GBB nomination vs Actual (${nomPairs.length} days)` : 'GBB nomination vs Actual'}
+            </div>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 10, color: C.muted }}>r =</span>
+              <span style={{
+                fontFamily: 'DM Mono, monospace', fontSize: 16, fontWeight: 700,
+                color: hasNom ? rColor(rNom) : C.dim,
+              }}>{hasNom ? fmtR(rNom) : '—'}</span>
+              {hasNom && rNom != null && (
+                <span style={{ fontSize: 10, color: C.muted }}>
+                  r² = {(rNom ** 2).toFixed(3)}
+                </span>
+              )}
+              {!hasNom && (
+                <span style={{ fontSize: 10, color: C.dim, fontStyle: 'italic' }}>
+                  load nominations to compute
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Methodology note */}
+        <details style={{ marginTop: 6 }}>
+          <summary style={{
+            fontSize: 11, color: C.muted, fontFamily: 'DM Mono, monospace',
+            cursor: 'pointer', userSelect: 'none', listStyle: 'none',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <span style={{ fontSize: 10 }}>▶</span>
+            How GBB nominated demand is calculated
+          </summary>
+          <div style={{
+            marginTop: 8, padding: '10px 14px',
+            background: C.surface2, borderRadius: 6,
+            fontSize: 11, color: C.muted, fontFamily: 'DM Mono, monospace',
+            lineHeight: 1.8,
+          }}>
+            <div style={{ color: C.text, marginBottom: 8, fontFamily: 'Syne, sans-serif', fontSize: 12, fontWeight: 700 }}>
+              SE nominated demand = SE production + net QLD inflow + SE storage net withdrawal
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 16px' }}>
+              <span style={{ color: C.blue }}>SE production</span>
+              <span>Sum of <code style={{ color: C.text }}>PROD.Supply</code> for all SE-state facilities — Longford, Otway, Moomba, ATHENA/Orbost, Lang Lang, etc.</span>
+
+              <span style={{ color: C.blue }}>Net QLD inflow</span>
+              <span><code style={{ color: C.text }}>SWQP @ Moomba Hub: Supply − TransferOut</code> — positive when QLD gas flows net into SE (winter), negative when SE gas flows to QLD (summer)</span>
+
+              <span style={{ color: C.blue }}>Storage net withdrawal</span>
+              <span>Sum of <code style={{ color: C.text }}>STOR.Supply − STOR.Demand</code> for SE storage facilities (Iona UGS, Moomba Storage, Dandenong LNG, NGS) — positive = net withdrawal supplying the market</span>
+
+              <span style={{ color: C.orange }}>VIC (implied)</span>
+              <span>Victorian city demand is not reported as a terminal node in GBB nominations — VTS city delivery nodes (Melbourne, Geelong, etc.) show near-zero demand. VIC is inferred as: SE total − NSW − SA − TAS</span>
+
+              <span style={{ color: C.green }}>NSW / SA / TAS</span>
+              <span><code style={{ color: C.text }}>PIPE.Demand</code> at terminal city and regional nodes — Sydney, Canberra, Regional–NSW, Adelaide, Regional–SA, Regional–TAS</span>
+            </div>
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}`, color: C.dim }}>
+              Days where the SE total falls outside 400–1,600 TJ are excluded as incomplete nominations (typically outer days of the 7-day window where Longford or SWQP have not yet submitted).
+              The nominated total tracks actual demand closely on day 1 but carries a structural positive bias in summer when storage injection reduces the apparent net withdrawal used in the implied VIC residual.
+            </div>
+          </div>
+        </details>
+
+      </ChartCard>
+    );
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '4px 0' }}>
 
@@ -617,7 +935,10 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
         <StateChart title="Tasmania" predKey="pred_tas" actualKey="actual_tas" color={C.red} />
       </div>
 
-      {/* Row 3 — NEM generation stack */}
+      {/* Row 3 — GBB Nomination comparison */}
+      <GBBNomChart />
+
+      {/* Row 4 — NEM generation stack */}
       <NEMStackChart chartData={chartData} forecastStart={forecastStart} />
 
       {/* Row 4 — Hourly dispatch */}

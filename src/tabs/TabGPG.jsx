@@ -8,6 +8,22 @@ import { exportToPowerPoint, exportToExcel } from '../utils/exportUtils';
 
 const THRESHOLDS = [400, 500, 600, 700];
 
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_TICKS  = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335];
+
+// Convert YYYY-MM-DD → day-of-year (1-based, using non-leap reference year 2019)
+function dateToDoy(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const start = new Date(y, 0, 1);
+  const cur   = new Date(y, m - 1, d);
+  return Math.round((cur - start) / 86400000) + 1;
+}
+
+function doyToMonthLabel(doy) {
+  const idx = MONTH_TICKS.findLastIndex(t => doy >= t);
+  return idx >= 0 ? MONTH_LABELS[idx] : '';
+}
+
 export default function TabGPG({ records, selectedYears, dateRange }) {
   const latestYear = Math.max(...selectedYears);
 
@@ -19,7 +35,8 @@ export default function TabGPG({ records, selectedYears, dateRange }) {
   const latestGPG = useMemo(() =>
     records.filter(r => r.year === latestYear && r.date >= dateRange[0] && r.date <= dateRange[1])
       .map(r => ({
-        date: r.date.substring(5),
+        doy: dateToDoy(r.date),
+        date: r.date,
         gpg: r.gpg_se,
         gpg_qld: r.gpg_qld,
         spike: r.gpg_se > 500 ? r.gpg_se : null,
@@ -63,16 +80,6 @@ export default function TabGPG({ records, selectedYears, dateRange }) {
     await exportToPowerPoint([{ id, title, subtitle: 'Gas Power Generation demand (TJ/day) — Source: AEMO' }]);
   };
 
-  const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const dayLabel = (doy) => {
-    const d = new Date(2024, 0, doy);
-    return `${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
-  };
-  const doyToDateStr = (doy) => {
-    const d = new Date(2024, 0, doy);
-    return `${d.getDate()} ${MONTH_LABELS[d.getMonth()]}`;
-  };
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* KPI row */}
@@ -94,9 +101,9 @@ export default function TabGPG({ records, selectedYears, dateRange }) {
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={latestGPG} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
             <CartesianGrid {...GRID_STYLE} />
-            <XAxis dataKey="date" {...AXIS_STYLE} tickFormatter={fmtDate} interval={Math.floor(latestGPG.length / 12)} />
+            <XAxis dataKey="doy" type="number" domain={[1, 365]} ticks={MONTH_TICKS} tickFormatter={doyToMonthLabel} {...AXIS_STYLE} />
             <YAxis {...AXIS_STYLE} />
-            <Tooltip content={<CustomTooltip formatter={(v) => `${Math.round(v).toLocaleString()} TJ`}  labelFormatter={fmtDate} /> } />
+            <Tooltip content={<CustomTooltip formatter={(v) => `${Math.round(v).toLocaleString()} TJ`} labelFormatter={(doy) => { const d = new Date(latestYear, 0, doy); return `${d.getDate()} ${MONTH_LABELS[d.getMonth()]} ${latestYear}`; }} />} />
             <Bar dataKey="gpg" name="GPG SE" maxBarSize={6}>
               {latestGPG.map((entry, i) => (
                 <Cell
@@ -137,9 +144,9 @@ export default function TabGPG({ records, selectedYears, dateRange }) {
         <ResponsiveContainer width="100%" height={280}>
           <ComposedChart data={yoyGPG} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
             <CartesianGrid {...GRID_STYLE} />
-            <XAxis dataKey="day" tickFormatter={dayLabel} ticks={[1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]} {...AXIS_STYLE} />
+            <XAxis dataKey="day" type="number" domain={[1, 365]} ticks={MONTH_TICKS} tickFormatter={doyToMonthLabel} {...AXIS_STYLE} />
             <YAxis {...AXIS_STYLE} />
-            <Tooltip content={<CustomTooltip labelFormatter={doyToDateStr} formatter={(v) => `${Math.round(v).toLocaleString()} TJ`} />} />
+            <Tooltip content={<CustomTooltip labelFormatter={(doy) => { const d = new Date(2024, 0, doy); return `${d.getDate()} ${MONTH_LABELS[d.getMonth()]}`; }} formatter={(v) => `${Math.round(v).toLocaleString()} TJ`} />} />
             {selectedYears.map(y => (
               <Line key={y} type="monotone" dataKey={String(y)} name={String(y)}
                 stroke={YEAR_COLORS[y] || '#888'} strokeWidth={y === latestYear ? 2.5 : 1.2}

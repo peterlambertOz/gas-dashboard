@@ -18,6 +18,19 @@ const SUP_COLORS = {
 
 // MONTH_LABELS kept for potential future use in axis formatters
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_TICKS  = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335];
+
+function dateToDoy(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const start = new Date(y, 0, 1);
+  const cur   = new Date(y, m - 1, d);
+  return Math.round((cur - start) / 86400000) + 1;
+}
+
+function doyToMonthLabel(doy) {
+  const idx = MONTH_TICKS.findLastIndex(t => doy >= t);
+  return idx >= 0 ? MONTH_LABELS[idx] : '';
+}
 
 // Indicative capacity bands (TJ/day)
 const CAPACITY = { longford: 870, moomba: 520, swqp: 500, shallowStorage: 300, deepStorage: 300 };
@@ -40,7 +53,8 @@ export default function TabSupplyCapacity({ records, selectedYears, dateRange })
         const linepack_draw =  lp < 0 ? -lp : 0;   // positive area in supply stack
         const linepack_fill =  lp > 0 ? -lp : 0;   // negative area (below x-axis, absorbing supply)
         return {
-          date: r.date.substring(5),
+          doy: dateToDoy(r.date),
+          date: r.date,
           // Positive supply stack
           moomba:           Math.round(r.production_moomba || 0),
           longford:         Math.round(r.production_longford || 0),
@@ -136,9 +150,9 @@ export default function TabSupplyCapacity({ records, selectedYears, dateRange })
         <ResponsiveContainer width="100%" height={360}>
           <ComposedChart data={supplyDaily} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
             <CartesianGrid {...GRID_STYLE} />
-            <XAxis dataKey="date" {...AXIS_STYLE} tickFormatter={fmtDate} interval={Math.floor(supplyDaily.length / 12)} />
+            <XAxis dataKey="doy" type="number" domain={[1, 365]} ticks={MONTH_TICKS} tickFormatter={doyToMonthLabel} {...AXIS_STYLE} />
             <YAxis {...AXIS_STYLE} tickFormatter={v => v.toLocaleString()} />
-            <Tooltip content={<CustomTooltip formatter={v => `${Math.round(v).toLocaleString()} TJ`}  labelFormatter={fmtDate} /> } />
+            <Tooltip content={<CustomTooltip formatter={v => `${Math.round(v).toLocaleString()} TJ`} labelFormatter={(doy) => { const d = new Date(supplyYear, 0, doy); return `${d.getDate()} ${MONTH_LABELS[d.getMonth()]} ${supplyYear}`; }} /> } />
             <ReferenceLine y={0} stroke="#555" strokeWidth={1} />
             {/* Positive supply stack */}
             <Area type="monotone" dataKey="moomba"        stackId="pos" name="Moomba"              fill={SUP_COLORS.moomba}        stroke={SUP_COLORS.moomba}        fillOpacity={1} />
@@ -181,9 +195,9 @@ export default function TabSupplyCapacity({ records, selectedYears, dateRange })
         <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={supplyDaily} margin={{ top: 10, right: 20, bottom: 0, left: 10 }}>
             <CartesianGrid {...GRID_STYLE} />
-            <XAxis dataKey="date" {...AXIS_STYLE} tickFormatter={fmtDate} interval={Math.floor(supplyDaily.length / 12)} />
+            <XAxis dataKey="doy" type="number" domain={[1, 365]} ticks={MONTH_TICKS} tickFormatter={doyToMonthLabel} {...AXIS_STYLE} />
             <YAxis {...AXIS_STYLE} tickFormatter={v => v.toLocaleString()} />
-            <Tooltip content={<CustomTooltip formatter={v => `${Math.round(v).toLocaleString()} TJ`}  labelFormatter={fmtDate} /> } />
+            <Tooltip content={<CustomTooltip formatter={v => `${Math.round(v).toLocaleString()} TJ`} labelFormatter={(doy) => { const d = new Date(supplyYear, 0, doy); return `${d.getDate()} ${MONTH_LABELS[d.getMonth()]} ${supplyYear}`; }} /> } />
             <ReferenceLine y={0} stroke="#888" strokeWidth={1.5} />
             <Bar dataKey="gap" name="Raw Residual Gap" stroke="none">
               {supplyDaily.map((entry, i) => (

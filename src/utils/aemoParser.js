@@ -382,6 +382,125 @@ function finaliseDailyMap(dailyMap) {
   return records;
 }
 
+// ── GBB Nomination fetch + parse ─────────────────────────────────────────────
+// Fetches GasBBNominationAndForecast.zip from nemweb and parses it into a
+// daily series of SE supply nominations, using the same SWQP/TERMINAL logic
+// established during analysis.  Returns an array of { date, gbb_se_total,
+// gbb_nsw, gbb_sa, gbb_tas, gbb_vic_implied, gbb_prod, gbb_qld_net, gbb_stor_net }.
+
+const GBB_NOM_URL = 'https://nemweb.com.au/Reports/Current/GBB/GasBBNominationAndForecast.zip';
+
+export async function fetchGBBNominations(onProgress) {
+  onProgress?.('Downloading GBB nominations...');
+
+  let zipBuffer;
+  try {
+    const response = await fetch(GBB_NOM_URL);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('zip') && !contentType.includes('octet-stream')) {
+      throw new Error('GBB nomination fetch blocked — nemweb.com.au not whitelisted. Upload the ZIP manually.');
+    }
+    zipBuffer = await response.arrayBuffer();
+  } catch (e) {
+    throw new Error(e.message.startsWith('GBB') ? e.message : `Failed to download nominations: ${e.message}`);
+  }
+
+  onProgress?.('Unzipping nominations...');
+  const zip = await JSZip.loadAsync(zipBuffer);
+  const csvFiles = Object.keys(zip.files).filter(f => f.toLowerCase().endsWith('.csv'));
+  if (!csvFiles.length) throw new Error('No CSV files found in nomination ZIP');
+
+  onProgress?.('Parsing nomination CSV...');
+  let allRows = [];
+  for (const filename of csvFiles) {
+    const text = await zip.files[filename].async('string');
+    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, transformHeader: h => h.trim() });
+    allRows = allRows.concat(parsed.data);
+  }
+
+  onProgress?.(`Aggregating ${allRows.length.toLocaleString()} nomination rows...`);
+  return parseGBBNominations(allRows);
+}
+
+export function parseGBBNominations(rows) {
+  // Keyed aggregation per gasdate
+  const byDate = {};
+
+  const ensure = (date) => {
+    if (!byDate[date]) byDate[date] = {
+      date, prod: 0, qld_net: 0, stor_net: 0, nsw: 0, sa: 0, tas: 0,
+    };
+    return byDate[date];
+  };
+
+  for (const row of rows) {
+    const rawDate = row['Gasdate'] || '';
+    if (!rawDate) continue;
+    // Normalise YYYY/MM/DD → YYYY-MM-DD
+    const date = rawDate.replace(/\//g, '-');
+    if (date < '2018-01-01') continue;
+
+    const ft  = (row['FacilityType']  || '').trim();
+    const nm  = (row['FacilityName']  || '').trim();
+    const loc = (row['LocationName']  || '').trim();
+    const st  = (row['State']         || '').trim();
+    const s   = parseFloat(row['Supply']      || 0) || 0;
+    const d   = parseFloat(row['Demand']      || 0) || 0;
+    const to  = parseFloat(row['TransferOut'] || 0) || 0;
+
+    const rec = ensure(date);
+
+    // SE production
+    if (ft === 'PROD' && SE_STATES.has(st)) {
+      rec.prod += s;
+    }
+
+    // SWQP net QLD↔SE flow at Moomba Hub
+    // Supply - TransferOut: positive = QLD gas flowing net into SE
+    // (Note: opposite sign to the ActualFlow parser which uses TO-S.
+    //  Nomination file has reversed semantics at this node — verified empirically.)
+    if (ft === 'PIPE' && nm === 'SWQP' && loc === 'Moomba Hub') {
+      rec.qld_net += s - to;
+    }
+
+    // SE storage net withdrawal
+    if (ft === 'STOR' && SE_STATES.has(st)) {
+      rec.stor_net += s - d;
+    }
+
+    // NSW / SA / TAS terminal node demand
+    if (ft === 'PIPE' && TERMINAL_LOCATIONS.has(loc)) {
+      const mappedState = TERMINAL_LOC_STATE[loc];
+      if (mappedState === 'NSW') rec.nsw += d;
+      else if (mappedState === 'SA')  rec.sa  += d;
+      else if (mappedState === 'TAS') rec.tas += d;
+      // VIC terminal nodes are ~0 in nominations — VIC is inferred as residual
+    }
+  }
+
+  return Object.values(byDate)
+    .map(r => {
+      const se_total    = Math.round((r.prod + r.qld_net + r.stor_net) * 10) / 10;
+      const vic_implied = Math.round((se_total - r.nsw - r.sa - r.tas) * 10) / 10;
+      return {
+        date:             r.date,
+        gbb_se_total:     se_total,
+        gbb_prod:         Math.round(r.prod    * 10) / 10,
+        gbb_qld_net:      Math.round(r.qld_net * 10) / 10,
+        gbb_stor_net:     Math.round(r.stor_net* 10) / 10,
+        gbb_nsw:          Math.round(r.nsw * 10) / 10,
+        gbb_sa:           Math.round(r.sa  * 10) / 10,
+        gbb_tas:          Math.round(r.tas * 10) / 10,
+        gbb_vic_implied:  vic_implied,
+        // Flag implausible days (< 400 TJ = missing nominations; > 1600 = likely data issue)
+        gbb_flag: se_total < 400 || se_total > 1600 ? true : false,
+      };
+    })
+    .filter(r => !r.gbb_flag)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
 // ── Load from user-uploaded processed Excel file ──────────────────────────────
 // Accepts an Excel file already in the processed daily format (columns as below).
 export async function loadFromExcel(file, onProgress) {
