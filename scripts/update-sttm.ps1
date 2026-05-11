@@ -1,4 +1,4 @@
-# update-sttm.ps1
+﻿# update-sttm.ps1
 # 1. Finds the most recently downloaded STTM price file and pushes it to the pod
 # 2. Finds the latest forecast files and pushes them to the pod
 # Run after downloading the STTM Price and Withdrawals xlsx from:
@@ -37,7 +37,7 @@ if (-not $forecastFile) {
     if ($LASTEXITCODE -eq 0) { Write-Host "  OK" } else { Write-Host "  FAILED" }
 }
 
-# ── Forecast (hourly) ────────────────────────────────────────────────────────
+# Forecast (hourly)
 $hourlyFile = Get-ChildItem -Path $forecastsDir -Filter "gas_forecast_hourly_????????.csv" -File |
               Sort-Object Name -Descending |
               Select-Object -First 1
@@ -50,7 +50,7 @@ if (-not $hourlyFile) {
     if ($LASTEXITCODE -eq 0) { Write-Host "  OK" } else { Write-Host "  FAILED" }
 }
 
-# ── Regime thresholds (static — only changes when notebook 1g-thresholds reruns) ─
+# Regime thresholds (static - only changes when notebook 1g-thresholds reruns)
 $thresholdsFile = "$forecastsDir\regime_thresholds.json"
 if (-not (Test-Path $thresholdsFile)) {
     Write-Host "regime_thresholds.json not found in $forecastsDir — skipping"
