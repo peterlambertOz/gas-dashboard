@@ -175,6 +175,11 @@ export default function App() {
           pred_hydro: parseFloat(raw.pred_hydro_mwh)         || 0,
           pred_coal:  parseFloat(raw.pred_coal_mwh)          || 0,
           pred_gas_mwh: Math.round(gpg_tj * 1000 / 8.5),
+          // Weather inputs + pre-computed regime
+          hdd18_se:        (() => { const v = parseFloat(raw.hdd18_se);        return isNaN(v) ? null : v; })(),
+          wind_speed_100m: (() => { const v = parseFloat(raw.wind_speed_100m); return isNaN(v) ? null : v; })(),
+          solar_radiation: (() => { const v = parseFloat(raw.solar_radiation); return isNaN(v) ? null : v; })(),
+          weather_regime:  raw.weather_regime?.trim() || null,
           // pass through actuals if present
           actual_total_tj:      parseFloat(raw.actual_total_tj)       || null,
           actual_gpg_tj:        parseFloat(raw.actual_gpg_tj)         || null,
