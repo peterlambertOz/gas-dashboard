@@ -26,17 +26,10 @@ function Deploy-DataFile($path) {
 }
 
 Write-Host "=== Step 1: Sync source files to pod ===" -ForegroundColor Cyan
-$srcFiles = @(
-    "src\App.jsx",
-    "src\tabs\TabForecast.jsx",
-    "src\tabs\TabHistoricalWeather.jsx"
-)
-foreach ($f in $srcFiles) {
-    $remote = $f -replace "\\", "/"
-    scp "$localDir\$f" "${pod}:${appDir}/${remote}"
-    if ($LASTEXITCODE -eq 0) { Write-Host "  $f OK" -ForegroundColor Green }
-    else { Write-Host "  WARNING: $f failed" -ForegroundColor Yellow }
-}
+# Sync entire src/ directory recursively so tabs, utils, components etc. are always included
+scp -r "$localDir\src" "${pod}:${appDir}/"
+if ($LASTEXITCODE -eq 0) { Write-Host "  src/ synced OK" -ForegroundColor Green }
+else { Write-Host "  WARNING: src/ sync failed" -ForegroundColor Red; exit 1 }
 
 Write-Host ""
 Write-Host "=== Step 2: Rebuild container on pod ===" -ForegroundColor Cyan
