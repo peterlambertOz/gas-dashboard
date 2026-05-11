@@ -646,8 +646,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
             style={{
               padding: '4px 12px', borderRadius: 5, cursor: gbbNomFetching ? 'not-allowed' : 'pointer',
               fontSize: 11, fontFamily: 'DM Mono, monospace',
-              border: `1px solid ${C.green}`, background: gbbNomFetching ? C.surface : `${C.green}22`,
-              color: gbbNomFetching ? C.muted : C.green, opacity: gbbNomFetching ? 0.6 : 1,
+              border: `1px solid #e879f9`, background: gbbNomFetching ? C.surface : `#e879f922`,
+              color: gbbNomFetching ? C.muted : '#e879f9', opacity: gbbNomFetching ? 0.6 : 1,
             }}
           >
             {gbbNomFetching ? '⟳ Fetching…' : '↓ Fetch latest AEMO nominations'}
@@ -717,7 +717,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
             <Line dataKey="forecast" stroke={C.blue} strokeWidth={2} dot={false} name="Forecast P50" connectNulls />
             {/* GBB nomination line — only rendered when data present */}
             {hasNom && (
-              <Line dataKey="gbb_nom" stroke={C.green} strokeWidth={1.5} strokeDasharray="6 3"
+              <Line dataKey="gbb_nom" stroke="#e879f9" strokeWidth={1.5} strokeDasharray="6 3"
                 dot={false} name="GBB nomination" connectNulls />
             )}
             {/* Actuals */}
@@ -741,7 +741,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
           </span>
           {hasNom && (
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 16, height: 0, borderTop: `2px dashed ${C.green}`, display: 'inline-block' }} />
+              <span style={{ width: 16, height: 0, borderTop: `2px dashed #e879f9`, display: 'inline-block' }} />
               GBB nomination
             </span>
           )}

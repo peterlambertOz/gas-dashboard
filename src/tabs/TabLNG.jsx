@@ -40,6 +40,11 @@ function dayLabel(day) {
   return MONTH_LABELS[d.getMonth()];
 }
 
+function doyToLabel(day) {
+  const d = new Date(2024, 0, day);
+  return `${d.getDate()} ${MONTH_LABELS[d.getMonth()]}`;
+}
+
 // Day ticks for X axis (1st of each month in a non-leap year)
 const MONTH_TICKS = [1, 32, 61, 92, 122, 153, 183, 214, 245, 275, 306, 336];
 
@@ -200,7 +205,7 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
               content={
                 <CustomTooltip
                   formatter={v => `${Math.round(v).toLocaleString()} TJ`}
-                  labelFormatter={dayLabel}
+                  labelFormatter={doyToLabel}
                 />
               }
             />
@@ -237,7 +242,7 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
                 content={
                   <CustomTooltip
                     formatter={v => `${Math.round(v).toLocaleString()} TJ`}
-                    labelFormatter={dayLabel}
+                    labelFormatter={doyToLabel}
                   />
                 }
               />
@@ -286,7 +291,7 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
                 content={
                   <CustomTooltip
                     formatter={v => `${Math.round(v).toLocaleString()} TJ`}
-                    labelFormatter={dayLabel}
+                    labelFormatter={doyToLabel}
                   />
                 }
               />
@@ -335,7 +340,7 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
                 content={
                   <CustomTooltip
                     formatter={v => `${Math.round(v).toLocaleString()} TJ`}
-                    labelFormatter={dayLabel}
+                    labelFormatter={doyToLabel}
                   />
                 }
               />
