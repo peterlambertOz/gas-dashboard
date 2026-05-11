@@ -37,5 +37,28 @@ if (-not $forecastFile) {
     if ($LASTEXITCODE -eq 0) { Write-Host "  OK" } else { Write-Host "  FAILED" }
 }
 
+# ── Forecast (hourly) ────────────────────────────────────────────────────────
+$hourlyFile = Get-ChildItem -Path $forecastsDir -Filter "gas_forecast_hourly_????????.csv" -File |
+              Sort-Object Name -Descending |
+              Select-Object -First 1
+
+if (-not $hourlyFile) {
+    Write-Host "No hourly forecast file found in $forecastsDir"
+} else {
+    Write-Host "Hourly forecast: $($hourlyFile.Name)"
+    scp $hourlyFile.FullName "${pod}:${podData}/$($hourlyFile.Name)"
+    if ($LASTEXITCODE -eq 0) { Write-Host "  OK" } else { Write-Host "  FAILED" }
+}
+
+# ── Regime thresholds (static — only changes when notebook 1g-thresholds reruns) ─
+$thresholdsFile = "$forecastsDir\regime_thresholds.json"
+if (-not (Test-Path $thresholdsFile)) {
+    Write-Host "regime_thresholds.json not found in $forecastsDir — skipping"
+} else {
+    Write-Host "Regime thresholds: regime_thresholds.json"
+    scp $thresholdsFile "${pod}:${podData}/regime_thresholds.json"
+    if ($LASTEXITCODE -eq 0) { Write-Host "  OK" } else { Write-Host "  FAILED" }
+}
+
 Write-Host ""
 Write-Host "Done: $(Get-Date -Format 'dd/MM/yyyy HH:mm')"
