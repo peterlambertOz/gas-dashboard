@@ -61,4 +61,4 @@ if (-not (Test-Path $thresholdsFile)) {
 }
 
 Write-Host ""
-Write-Host "Done: $(Get-Date -Format 'dd/MM/yyyy HH:mm')"
+Write-Host "Done: $(Get-Date -Format ""dd/MM/yyyy HH:mm"")"
