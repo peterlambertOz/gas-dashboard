@@ -12,10 +12,12 @@ import TabFlowMap from './tabs/TabFlowMap';
 import TabLNG from './tabs/TabLNG';
 import TabGasPrice from './tabs/TabGasPrice';
 import TabForecast from './tabs/TabForecast';
+import TabValidation from './tabs/TabValidation';
 import TabHistoricalWeather from './tabs/TabHistoricalWeather';
 
 const TABS = [
   { id: 'demand',    label: 'Daily Demand' },
+  { id: 'validation', label: 'Model Validation' },
   { id: 'forecast',  label: 'Forecast Demand' },
   { id: 'historical', label: 'Historical Weather' },
   { id: 'gpg',       label: 'GPG Analysis' },
@@ -305,7 +307,7 @@ export default function App() {
     if (records.length) exportToExcel(records.filter(r => selectedYears.includes(r.year)));
   };
 
-  const ActiveTab = { demand: TabDailyDemand, forecast: TabForecast, historical: TabHistoricalWeather, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
+  const ActiveTab = { demand: TabDailyDemand, validation: TabValidation, forecast: TabForecast, historical: TabHistoricalWeather, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
   const priceProps      = { sttmData, dwgmWb, dwgmPrices, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
   const forecastProps   = {
     forecastData, forecastPoeData, hourlyData, onLoadForecast: routeFile,

@@ -37,6 +37,18 @@ if (-not $forecastFile) {
     if ($LASTEXITCODE -eq 0) { Write-Host "  OK" } else { Write-Host "  FAILED" }
 }
 
+# Validation CSVs (one per year - only changes when models are retrained)
+$validationFiles = Get-ChildItem -Path $forecastsDir -Filter "gas_validation_????.csv" -File
+if ($validationFiles.Count -eq 0) {
+    Write-Host "No validation CSV files found in $forecastsDir"
+} else {
+    Write-Host "Validation files: $($validationFiles.Count) years"
+    foreach ($vf in $validationFiles) {
+        scp $vf.FullName "${pod}:${podData}/$($vf.Name)"
+        if ($LASTEXITCODE -eq 0) { Write-Host "  $($vf.Name) OK" } else { Write-Host "  $($vf.Name) FAILED" }
+    }
+}
+
 # Forecast (hourly)
 $hourlyFile = Get-ChildItem -Path $forecastsDir -Filter "gas_forecast_hourly_????????.csv" -File |
               Sort-Object Name -Descending |
