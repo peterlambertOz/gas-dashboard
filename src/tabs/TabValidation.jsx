@@ -41,7 +41,7 @@ const calcR2 = (rows, predKey, actKey) => {
   return 1 - ssRes / ssTot;
 };
 
-const fmtR2 = (r2) => r2 == null ? '—' : r2.toFixed(4);
+const fmtR2 = (r2) => r2 == null ? '—' : r2.toFixed(2);
 
 // ── CSV parser ────────────────────────────────────────────────────────────────
 const parseValidationCsv = (text) => {
@@ -100,10 +100,10 @@ const R2Badge = ({ r2 }) => (
     <span style={{ color: C.dim }}>R²</span>
     <span style={{
       color: r2 == null ? C.dim
-           : r2 >= 0.95 ? C.green
-           : r2 >= 0.85 ? C.orange
+           : r2 >= 0.75 ? C.green
+           : r2 >= 0.50 ? C.orange
            : C.red,
-      fontWeight: 700, fontSize: 11,
+      fontSize: 11,
     }}>
       {fmtR2(r2)}
     </span>
@@ -140,8 +140,8 @@ const ValidationChart = ({ title, subtitle, data, predKey, actKey, color, yDomai
           {hasActuals && (
             <Line
               dataKey={actKey} name="Actual" type="monotone"
-              stroke="none" dot={{ fill: C.actual, r: 2.5, strokeWidth: 0 }}
-              activeDot={{ r: 4 }} connectNulls
+              stroke="none" dot={{ fill: C.actual, r: 1.5, strokeWidth: 0 }}
+              activeDot={{ r: 3 }} connectNulls
             />
           )}
         </ComposedChart>
@@ -266,8 +266,8 @@ export default function TabValidation() {
                 <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Mono, monospace' }}>{label}</span>
                   <span style={{
-                    fontSize: 12, fontWeight: 700, fontFamily: 'DM Mono, monospace',
-                    color: r2 == null ? C.dim : r2 >= 0.95 ? C.green : r2 >= 0.85 ? C.orange : C.red,
+                    fontSize: 12, fontFamily: 'DM Mono, monospace',
+                    color: r2 == null ? C.dim : r2 >= 0.75 ? C.green : r2 >= 0.50 ? C.orange : C.red,
                   }}>
                     {fmtR2(r2)}
                   </span>
@@ -282,7 +282,7 @@ export default function TabValidation() {
               data={data}
               predKey="pred_total_tj"
               actKey="actual_total_tj"
-              color={yc}
+              color={C.blue}
             />
 
             {/* Row 2: GPG + Non-power */}
@@ -293,7 +293,7 @@ export default function TabValidation() {
                 data={data}
                 predKey="pred_gpg_tj"
                 actKey="actual_gpg_tj"
-                color={C.orange}
+                color={C.teal}
               />
               <ValidationChart
                 title="Non-Power Gas Demand"
@@ -332,7 +332,7 @@ export default function TabValidation() {
                 data={data}
                 predKey="pred_sa_nonpower_tj"
                 actKey="actual_sa_nonpower_tj"
-                color={C.teal}
+                color={C.orange}
               />
               <ValidationChart
                 title="Tasmania"

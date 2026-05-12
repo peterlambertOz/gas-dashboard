@@ -990,7 +990,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
           subtitle="TJ/day"
           predKey="pred_gpg" actualKey="actual_gpg"
           poeLoKey="poe_gpg_lo" poeHiKey="poe_gpg_hi"
-          color={C.orange}
+          color={C.teal}
         />
         <GasDemandChart
           title="Non-Power Gas Demand"
@@ -1006,7 +1006,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
         <StateChart title="Victoria"       predKey="pred_vic" actualKey="actual_vic" color={C.blue} />
         <StateChart title="NSW"            predKey="pred_nsw" actualKey="actual_nsw" color={C.purple} />
-        <StateChart title="South Australia" predKey="pred_sa"  actualKey="actual_sa"  color={C.teal} />
+        <StateChart title="South Australia" predKey="pred_sa"  actualKey="actual_sa"  color={C.orange} />
         <StateChart title="Tasmania"       predKey="pred_tas" actualKey="actual_tas" color={C.red} />
       </div>
 
