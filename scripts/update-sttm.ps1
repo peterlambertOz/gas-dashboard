@@ -44,7 +44,8 @@ Write-Host "Downloading AEMO price files..."
 $dwgmDest = "$aemoDir\dwgm-prices-and-demand.xlsx"
 try {
     Invoke-WebRequest -Uri "https://www.aemo.com.au/-/media/files/gas/dwgm/dwgm-prices-and-demand.xlsx" `
-        -OutFile $dwgmDest -UseBasicParsing
+        -OutFile $dwgmDest -UseBasicParsing `
+        -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36" }
     Write-Host "  DWGM OK ($([math]::Round((Get-Item $dwgmDest).Length/1KB))KB)"
 } catch {
     Write-Host "  DWGM download failed: $_" -ForegroundColor Yellow
@@ -53,7 +54,8 @@ try {
 $sttmDest = "$aemoDir\sttm-price-and-withdrawals.xlsx"
 try {
     Invoke-WebRequest -Uri "https://www.aemo.com.au/-/media/files/gas/sttm/data/sttm-price-and-withdrawals.xlsx" `
-        -OutFile $sttmDest -UseBasicParsing
+        -OutFile $sttmDest -UseBasicParsing `
+        -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36" }
     Write-Host "  STTM OK ($([math]::Round((Get-Item $sttmDest).Length/1KB))KB)"
 } catch {
     Write-Host "  STTM download failed: $_" -ForegroundColor Yellow
