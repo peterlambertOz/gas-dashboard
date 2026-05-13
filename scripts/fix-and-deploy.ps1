@@ -64,7 +64,7 @@ foreach ($file in @("dwgm-prices-and-demand.xlsx", "sttm-price-and-withdrawals.x
 }
 
 # Regime thresholds (static - only changes when notebook 1g-thresholds reruns)
-Deploy-DataFile "$forecastsDiregime_thresholds.json"
+Deploy-DataFile (Join-Path $forecastsDir "regime_thresholds.json")
 
 # Validation CSVs
 foreach ($vf in (Get-ChildItem -Path $forecastsDir -Filter "gas_validation_202?.csv")) {
