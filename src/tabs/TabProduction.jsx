@@ -314,8 +314,8 @@ export default function TabProduction({ records, selectedYears, dateRange }) {
           <ComposedChart data={swingFactors} margin={{ top: 10, right: 20, bottom: 0, left: 10 }}>
             <CartesianGrid {...GRID_STYLE} />
             <XAxis dataKey="year" {...AXIS_STYLE} />
-            <YAxis {...AXIS_STYLE} domain={[90, 160]} tickFormatter={v => `${v}%`} />
-            <Tooltip content={<CustomTooltip formatter={(v) => `${v} labelFormatter={fmtDate}%`} />} />
+            <YAxis {...AXIS_STYLE} domain={[90, 120]} tickFormatter={v => `${v}%`} />
+            <Tooltip content={<CustomTooltip formatter={(v) => `${v}%`} />} />
             <Bar dataKey="peakPct" name="Peak % of Avg" fill="#e6a817" opacity={0.85} />
             <Line type="monotone" dataKey="winterPct" name="Winter % of Avg" stroke="#388bfd" strokeWidth={2} dot />
             <ReferenceLine y={100} stroke="var(--border)" strokeDasharray="4 2" />
