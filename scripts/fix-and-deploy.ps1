@@ -58,6 +58,19 @@ foreach ($file in @("gas_historical_poe.json", "gas_historical_traces.json")) {
     Deploy-DataFile "$forecastsDir\$file"
 }
 
+# AEMO price files (downloaded by update-sttm.ps1)
+foreach ($file in @("dwgm-prices-and-demand.xlsx", "sttm-price-and-withdrawals.xlsx")) {
+    Deploy-DataFile "$forecastsDir\$file"
+}
+
+# Regime thresholds (static - only changes when notebook 1g-thresholds reruns)
+Deploy-DataFile "$forecastsDiregime_thresholds.json"
+
+# Validation CSVs
+foreach ($vf in (Get-ChildItem -Path $forecastsDir -Filter "gas_validation_202?.csv")) {
+    Deploy-DataFile $vf.FullName
+}
+
 Write-Host ""
 Write-Host "=== Done $(Get-Date -Format 'dd/MM/yyyy HH:mm') ===" -ForegroundColor Cyan
 Write-Host "Local:  http://localhost:5173/" -ForegroundColor Green
