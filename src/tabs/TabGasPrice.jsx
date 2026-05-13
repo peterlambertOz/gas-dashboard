@@ -27,8 +27,8 @@ import {
 import { exportToPowerPoint, exportToExcel } from '../utils/exportUtils';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const STTM_URL  = '/aemo-media/files/gas/sttm/data/sttm-price-and-withdrawals.xlsx';
-const DWGM_URL  = '/aemo-media/files/gas/dwgm/dwgm-prices-and-demand.xlsx';
+const STTM_URL  = '/data/sttm-price-and-withdrawals.xlsx';
+const DWGM_URL  = '/data/dwgm-prices-and-demand.xlsx';
 
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONTH_TICKS  = [1, 32, 61, 92, 122, 153, 183, 214, 245, 275, 306, 336];
@@ -213,6 +213,13 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
     setLoaded(prev => ({ ...prev, dwgm: true }));
   }, [dwgmPricesProp]);
 
+  // ── Auto-fetch on mount ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!loaded.sttm && !loaded.dwgm && !loading.sttm && !loading.dwgm) {
+      fetchBoth();
+    }
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [use6am,        setUse6am]        = useState(false);
   const [spreadYear,    setSpreadYear]    = useState(null);
@@ -317,6 +324,9 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
     fetchAndParse(DWGM_URL, 'dwgm');
   }, [fetchAndParse]);
 
+  // ── Auto-fetch on mount ──────────────────────────────────────────────────────
+  useEffect(() => { fetchBoth(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Derived chart data ────────────────────────────────────────────────────────
   const availableYears = useMemo(() =>
     [...new Set(priceRecords.map(r => r.year))].filter(y => !isNaN(y)).sort()
@@ -420,12 +430,12 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
         <div style={{ background: 'var(--surface-2, #161b22)', border: '1px solid var(--border, #30363d)', borderRadius: 8, padding: '16px 24px', maxWidth: 420, width: '100%', textAlign: 'left' }}>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontFamily: 'DM Mono, monospace' }}>Available data files</div>
           {[
-            { label: 'DWGM prices (Victorian gas market)', file: 'DWGM.XLSX' },
-            { label: 'STTM prices (Sydney, Adelaide, Brisbane)', file: 'STTM.XLSX' },
-          ].map(({ label, file }) => (
+            { label: 'DWGM prices (Victorian gas market)', href: 'https://www.aemo.com.au/-/media/files/gas/dwgm/dwgm-prices-and-demand.xlsx', file: 'dwgm-prices-and-demand.xlsx' },
+            { label: 'STTM prices (Sydney, Adelaide, Brisbane)', href: 'https://www.aemo.com.au/-/media/files/gas/sttm/data/sttm-price-and-withdrawals.xlsx', file: 'sttm-price-and-withdrawals.xlsx' },
+          ].map(({ label, href, file }) => (
             <div key={file} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border, #30363d)' }}>
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
-              <a href={`/data/${file}`} download style={{ fontSize: 12, fontFamily: 'DM Mono, monospace', color: '#39d0d8', textDecoration: 'none' }}>⬇ {file}</a>
+              <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontFamily: 'DM Mono, monospace', color: '#39d0d8', textDecoration: 'none' }}>⬇ {file}</a>
             </div>
           ))}
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, fontFamily: 'DM Mono, monospace' }}>

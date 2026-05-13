@@ -37,8 +37,39 @@ if (-not $forecastFile) {
     if ($LASTEXITCODE -eq 0) { Write-Host "  OK" } else { Write-Host "  FAILED" }
 }
 
+# Download latest AEMO price files
+$aemoDir = $forecastsDir
+Write-Host "Downloading AEMO price files..."
+
+$dwgmDest = "$aemoDir\dwgm-prices-and-demand.xlsx"
+try {
+    Invoke-WebRequest -Uri "https://www.aemo.com.au/-/media/files/gas/dwgm/dwgm-prices-and-demand.xlsx" `
+        -OutFile $dwgmDest -UseBasicParsing
+    Write-Host "  DWGM OK ($([math]::Round((Get-Item $dwgmDest).Length/1KB))KB)"
+} catch {
+    Write-Host "  DWGM download failed: $_" -ForegroundColor Yellow
+}
+
+$sttmDest = "$aemoDir\sttm-price-and-withdrawals.xlsx"
+try {
+    Invoke-WebRequest -Uri "https://www.aemo.com.au/-/media/files/gas/sttm/data/sttm-price-and-withdrawals.xlsx" `
+        -OutFile $sttmDest -UseBasicParsing
+    Write-Host "  STTM OK ($([math]::Round((Get-Item $sttmDest).Length/1KB))KB)"
+} catch {
+    Write-Host "  STTM download failed: $_" -ForegroundColor Yellow
+}
+
+# Push AEMO price files to pod
+foreach ($priceFile in @("dwgm-prices-and-demand.xlsx", "sttm-price-and-withdrawals.xlsx")) {
+    $src = "$aemoDir\$priceFile"
+    if (Test-Path $src) {
+        scp $src "${pod}:${podData}/$priceFile"
+        if ($LASTEXITCODE -eq 0) { Write-Host "  $priceFile OK" } else { Write-Host "  $priceFile FAILED" }
+    }
+}
+
 # Validation CSVs (one per year - only changes when models are retrained)
-$validationFiles = Get-ChildItem -Path $forecastsDir -Filter "gas_validation_????.csv" -File
+$validationFiles = Get-ChildItem -Path $forecastsDir -Filter "gas_validation_202?.csv" -File
 if ($validationFiles.Count -eq 0) {
     Write-Host "No validation CSV files found in $forecastsDir"
 } else {
