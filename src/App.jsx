@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
-import { fetchAEMOData, fetchDwgmData, loadFromExcel, generateSampleData, computeStats } from './utils/aemoParser';
+import { fetchAEMOData, fetchDwgmData, loadFromExcel, aggregateRows, generateSampleData, computeStats } from './utils/aemoParser';
 import { exportToExcel, exportToPowerPoint } from './utils/exportUtils';
 import TabDailyDemand from './tabs/TabDailyDemand';
 import TabGPG from './tabs/TabGPG';
@@ -145,6 +145,79 @@ export default function App() {
   // Route a single parsed file to the right state setter
   const routeFile = useCallback(async (file) => {
     const name = file.name.toLowerCase();
+
+    // Raw GBB actuals ZIP (GasBBActualFlowStorage.zip or any zip containing GasDate CSVs)
+    if (name.endsWith('.zip')) {
+      setLoading(true);
+      setError('');
+      setLoadMsg('Unzipping GBB actuals...');
+      try {
+        const JSZip = (await import('jszip')).default;
+        const Papa  = (await import('papaparse')).default;
+        const buf   = await file.arrayBuffer();
+        const zip   = await JSZip.loadAsync(buf);
+        const csvFiles = Object.keys(zip.files).filter(f => f.toLowerCase().endsWith('.csv'));
+        if (!csvFiles.length) throw new Error('No CSV files found in ZIP');
+        setLoadMsg(`Parsing ${csvFiles.length} CSV file(s)...`);
+        let allRows = [];
+        for (const fn of csvFiles) {
+          const text   = await zip.files[fn].async('string');
+          const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, transformHeader: h => h.trim() });
+          allRows = allRows.concat(parsed.data);
+        }
+        // Detect raw GBB format by presence of GasDate + FacilityType columns
+        const sampleKeys = Object.keys(allRows[0] || {});
+        if (!sampleKeys.includes('GasDate') && !sampleKeys.includes('FacilityType')) {
+          throw new Error('ZIP does not appear to contain raw GBB actuals (expected GasDate + FacilityType columns).');
+        }
+        setLoadMsg(`Aggregating ${allRows.length.toLocaleString()} rows...`);
+        const data = aggregateRows(allRows);
+        const fetchedAt = new Date();
+        applyData(data, setRecords, setStats, setLastFetch, setSelectedYears, setDateRange, setUsingDemo, fetchedAt);
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+          localStorage.setItem(CACHE_META_KEY, JSON.stringify({ fetchedAt: fetchedAt.toISOString(), count: data.length }));
+        } catch (cacheErr) {
+          console.warn('Cache save failed:', cacheErr);
+        }
+      } catch (err) {
+        setError('GBB ZIP load failed: ' + err.message);
+      } finally {
+        setLoading(false);
+        setLoadMsg('');
+      }
+      return;
+    }
+
+    // Raw GBB actuals CSV (single file, same column format as inside the ZIP)
+    if (name.endsWith('.csv') && !name.includes('gas_forecast')) {
+      const text = await file.text();
+      const Papa = (await import('papaparse')).default;
+      const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, transformHeader: h => h.trim() });
+      const sampleKeys = Object.keys(parsed.data[0] || {});
+      if (sampleKeys.includes('GasDate') && sampleKeys.includes('FacilityType')) {
+        setLoading(true);
+        setError('');
+        setLoadMsg(`Aggregating ${parsed.data.length.toLocaleString()} rows...`);
+        try {
+          const data = aggregateRows(parsed.data);
+          const fetchedAt = new Date();
+          applyData(data, setRecords, setStats, setLastFetch, setSelectedYears, setDateRange, setUsingDemo, fetchedAt);
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+            localStorage.setItem(CACHE_META_KEY, JSON.stringify({ fetchedAt: fetchedAt.toISOString(), count: data.length }));
+          } catch (cacheErr) {
+            console.warn('Cache save failed:', cacheErr);
+          }
+        } catch (err) {
+          setError('GBB CSV load failed: ' + err.message);
+        } finally {
+          setLoading(false);
+          setLoadMsg('');
+        }
+        return;
+      }
+    }
 
     // Forecast main CSV (PoE bands now embedded in same file)
     if (name.includes('gas_forecast') && name.endsWith('.csv')) {
@@ -311,6 +384,7 @@ export default function App() {
   const priceProps      = { sttmData, dwgmWb, dwgmPrices, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
   const forecastProps   = {
     forecastData, forecastPoeData, hourlyData, onLoadForecast: routeFile,
+    onLoadGBBActuals: routeFile,
     onForecastAutoLoaded: (rows, poeMap) => {
       setForecastData(rows);
       if (poeMap) setForecastPoeData(poeMap);

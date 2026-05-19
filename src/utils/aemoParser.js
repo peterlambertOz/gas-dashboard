@@ -116,7 +116,7 @@ const SE_LINEPACK_PIPES = new Set(['VTS','MSP','EGP','MAPS','PCA','PCI','TGP','M
 //                  (Supply = withdrawal from storage, Demand = injection into storage)
 //   Iona balance = STOR.HeldInStorage where FacilityName = 'Iona UGS'
 
-function aggregateRows(rows) {
+export function aggregateRows(rows) {
   const dailyMap = new Map();
 
   const ensure = (date) => {

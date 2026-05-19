@@ -294,7 +294,7 @@ function HourlyDispatchChart({ hourlyData, hourlyDay, setHourlyDay }) {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function TabForecast({ records = [], selectedYears = [2026], forecastData = null, forecastPoeData = null, forecastDate = null, onLoadForecast, onForecastAutoLoaded, hourlyData = null }) {
+export default function TabForecast({ records = [], selectedYears = [2026], forecastData = null, forecastPoeData = null, forecastDate = null, onLoadForecast, onForecastAutoLoaded, onLoadGBBActuals, hourlyData = null }) {
   const [resolvedDate,   setResolvedDate]   = useState(forecastDate);
   const [autoFetching,   setAutoFetching]   = useState(false);
   const [autoFetchDone,  setAutoFetchDone]  = useState(false);
@@ -964,12 +964,52 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
         <span style={{ color: C.blue }}>ℹ</span>
         <span>Loaded: <code style={{ fontFamily: 'DM Mono, monospace', color: C.teal }}>gas_forecast_{resolvedDate ?? '…'}.csv</code> — auto-fetched from <code style={{ fontFamily: 'DM Mono, monospace', color: C.teal }}>/data/</code></span>
         <label style={{ marginLeft: 'auto', padding: '3px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontFamily: 'DM Mono, monospace', border: `1px solid ${C.border}`, background: 'transparent', color: C.muted }}>
-          ↑ Upload new CSV
-          <input type="file" accept=".csv" multiple onChange={async e => {
-            const files = Array.from(e.target.files || []);
-            e.target.value = '';
-            for (const file of files) { if (onLoadForecast) await onLoadForecast(file); }
-          }} style={{ display: 'none' }} />
+          ↑ Upload ZIP / CSV
+          <input type="file" accept=".zip,.csv,.CSV" style={{ display: 'none' }}
+            onChange={async e => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              if (file.name.toLowerCase().endsWith('.zip')) {
+                try {
+                  const JSZip = (await import('jszip')).default;
+                  const buf   = await file.arrayBuffer();
+                  const zip   = await JSZip.loadAsync(buf);
+                  const csvFiles = Object.keys(zip.files)
+                    .filter(f => f.toLowerCase().endsWith('.csv'))
+                    .sort();
+                  for (const fn of csvFiles) {
+                    const text = await zip.files[fn].async('string');
+                    if (!text.trim().toLowerCase().startsWith('date')) continue;
+                    const { rows, poeMap } = parseForecastCsv(text);
+                    if (rows.length) {
+                      // extract date from filename e.g. gas_forecast_20260519.csv
+                      const match = fn.match(/(\d{8})/);
+                      if (match) setResolvedDate(match[1]);
+                      if (onForecastAutoLoaded) onForecastAutoLoaded(rows, Object.keys(poeMap).length ? poeMap : null);
+                      break;
+                    }
+                  }
+                } catch (err) {
+                  console.error('[Forecast ZIP]', err);
+                }
+              } else {
+                if (onLoadForecast) await onLoadForecast(file);
+              }
+            }}
+          />
+        </label>
+        <label style={{ padding: '3px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontFamily: 'DM Mono, monospace', border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, display: 'flex', alignItems: 'center', gap: 5 }}>
+          ↑ Upload GBB Actuals
+          <span style={{ fontSize: 10, color: C.dim }}>ZIP / XLSX / CSV</span>
+          <input type="file" accept=".zip,.xlsx,.xls,.csv,.CSV" style={{ display: 'none' }}
+            onChange={async e => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              if (onLoadGBBActuals) await onLoadGBBActuals(file);
+            }}
+          />
         </label>
       </div>
 
