@@ -31,17 +31,24 @@ const fmtDate = (d) => {
   return `${parseInt(dd)}-${months[parseInt(m) - 1]}`;
 };
 
-const calcR2 = (rows, predKey, actKey) => {
-  const valid = rows.filter(r => r[predKey] != null && r[actKey] != null);
-  if (valid.length < 2) return null;
-  const mean = valid.reduce((s, r) => s + r[actKey], 0) / valid.length;
-  const ssTot = valid.reduce((s, r) => s + (r[actKey] - mean) ** 2, 0);
-  const ssRes = valid.reduce((s, r) => s + (r[actKey] - r[predKey]) ** 2, 0);
-  if (ssTot === 0) return null;
-  return 1 - ssRes / ssTot;
+const calcAccuracy = (rows, predKey, actKey) => {
+  const pairs = rows.filter(r => r[predKey] != null && r[actKey] != null && r[actKey] > 0);
+  if (pairs.length < 3) return null;
+  const n   = pairs.length;
+  const xs  = pairs.map(r => r[predKey]);
+  const ys  = pairs.map(r => r[actKey]);
+  const mx  = xs.reduce((a, b) => a + b, 0) / n;
+  const my  = ys.reduce((a, b) => a + b, 0) / n;
+  const num = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0);
+  const den = Math.sqrt(xs.reduce((s, x) => s + (x - mx) ** 2, 0) * ys.reduce((s, y) => s + (y - my) ** 2, 0));
+  const r2   = den === 0 ? null : (num / den) ** 2;  // Pearson r²
+  const mae  = xs.reduce((s, x, i) => s + Math.abs(x - ys[i]), 0) / n;
+  const mape = pairs.reduce((s, r) => s + Math.abs((r[predKey] - r[actKey]) / r[actKey]), 0) / n * 100;
+  return { r2, mae, mape, n };
 };
 
-const fmtR2 = (r2) => r2 == null ? '—' : r2.toFixed(2);
+const fmtR2  = (r2)  => r2  == null ? '—' : r2.toFixed(2);
+const fmtMAE = (mae) => mae == null ? '—' : `${Math.round(mae)} TJ`;
 
 // ── CSV parser ────────────────────────────────────────────────────────────────
 const parseValidationCsv = (text) => {
@@ -90,29 +97,29 @@ const ChartTooltip = ({ active, payload, label }) => {
   );
 };
 
-// ── R² badge ──────────────────────────────────────────────────────────────────
-const R2Badge = ({ r2 }) => (
-  <div style={{
-    position: 'absolute', top: 10, right: 16,
-    fontFamily: 'DM Mono, monospace', fontSize: 10,
-    color: C.muted, display: 'flex', alignItems: 'center', gap: 4,
-  }}>
-    <span style={{ color: C.dim }}>R²</span>
-    <span style={{
-      color: r2 == null ? C.dim
-           : r2 >= 0.75 ? C.green
-           : r2 >= 0.50 ? C.orange
-           : C.red,
-      fontSize: 11,
+const r2Color  = (r2)   => r2   == null ? C.dim : r2   >= 0.56 ? C.green : r2   >= 0.25 ? C.orange : C.red;
+const maeColor = (mape) => mape == null ? C.dim : mape <  10   ? C.green : mape <  20   ? C.orange : C.red;
+
+const AccuracyBadge = ({ acc }) => {
+  if (!acc) return null;
+  return (
+    <div style={{
+      position: 'absolute', top: 10, right: 16,
+      fontFamily: 'DM Mono, monospace', fontSize: 11,
+      display: 'flex', alignItems: 'center', gap: 10,
     }}>
-      {fmtR2(r2)}
-    </span>
-  </div>
-);
+      <span style={{ color: C.dim }}>R²</span>
+      <span style={{ color: r2Color(acc.r2) }}>{fmtR2(acc.r2)}</span>
+      <span style={{ color: C.dim }}>·</span>
+      <span style={{ color: C.dim }}>MAE</span>
+      <span style={{ color: maeColor(acc.mape) }}>{fmtMAE(acc.mae)}</span>
+    </div>
+  );
+};
 
 // ── Single validation chart ───────────────────────────────────────────────────
 const ValidationChart = ({ title, subtitle, data, predKey, actKey, color, yDomain }) => {
-  const r2 = useMemo(() => calcR2(data, predKey, actKey), [data, predKey, actKey]);
+  const acc = useMemo(() => calcAccuracy(data, predKey, actKey), [data, predKey, actKey]);
   const hasActuals = data.some(r => r[actKey] != null);
 
   return (
@@ -120,7 +127,7 @@ const ValidationChart = ({ title, subtitle, data, predKey, actKey, color, yDomai
       background: C.surface, border: `1px solid ${C.border}`,
       borderRadius: 8, padding: '12px 16px 8px', position: 'relative',
     }}>
-      <R2Badge r2={r2} />
+      <AccuracyBadge acc={acc} />
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{title}</div>
         <div style={{ fontSize: 11, color: C.muted }}>{subtitle}</div>
@@ -239,9 +246,9 @@ export default function TabValidation() {
 
       {/* Charts */}
       {data && !loading && (() => {
-        const totalR2   = calcR2(data, 'pred_total_tj',   'actual_total_tj');
-        const gpgR2     = calcR2(data, 'pred_gpg_tj',     'actual_gpg_tj');
-        const npR2      = calcR2(data, 'pred_nonpower_tj','actual_nonpower_tj');
+        const totalAcc = calcAccuracy(data, 'pred_total_tj',    'actual_total_tj');
+        const gpgAcc   = calcAccuracy(data, 'pred_gpg_tj',      'actual_gpg_tj');
+        const npAcc    = calcAccuracy(data, 'pred_nonpower_tj',  'actual_nonpower_tj');
 
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -259,18 +266,16 @@ export default function TabValidation() {
                 {data.length} days
               </div>
               {[
-                { label: 'Total R²',    r2: totalR2,  color: C.blue   },
-                { label: 'GPG R²',      r2: gpgR2,    color: C.orange },
-                { label: 'Non-pwr R²',  r2: npR2,     color: C.green  },
-              ].map(({ label, r2, color }) => (
-                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Mono, monospace' }}>{label}</span>
-                  <span style={{
-                    fontSize: 12, fontFamily: 'DM Mono, monospace',
-                    color: r2 == null ? C.dim : r2 >= 0.75 ? C.green : r2 >= 0.50 ? C.orange : C.red,
-                  }}>
-                    {fmtR2(r2)}
-                  </span>
+                { label: 'Total',   acc: totalAcc },
+                { label: 'GPG',     acc: gpgAcc   },
+                { label: 'Non-pwr', acc: npAcc     },
+              ].map(({ label, acc }) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'DM Mono, monospace', fontSize: 11 }}>
+                  <span style={{ color: C.muted }}>{label}</span>
+                  <span style={{ color: C.dim }}>R²</span>
+                  <span style={{ color: r2Color(acc?.r2) }}>{fmtR2(acc?.r2)}</span>
+                  <span style={{ color: C.dim }}>MAE</span>
+                  <span style={{ color: maeColor(acc?.mape) }}>{fmtMAE(acc?.mae)}</span>
                 </div>
               ))}
             </div>

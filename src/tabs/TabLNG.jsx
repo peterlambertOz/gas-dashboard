@@ -48,6 +48,44 @@ function doyToLabel(day) {
 // Day ticks for X axis (1st of each month in a non-leap year)
 const MONTH_TICKS = [1, 32, 61, 92, 122, 153, 183, 214, 245, 275, 306, 336];
 
+// ── Effective capacity frontier ────────────────────────────────────────────────
+// Step 1: for each DOY, take the max across ALL years in records.
+// Step 2: for each DOY, smooth by taking the 90th percentile of the values
+//         in a centred ±20-day window of those per-DOY maxima.
+// This produces a robust seasonal frontier that isn't dominated by brief spikes.
+function calcFrontier(records, field) {
+  // Build per-DOY max across all years (only positive values)
+  const doyMax = {};
+  for (const r of records) {
+    const val = r[field] || 0;
+    if (val <= 0) continue;
+    const doy = r.dayOfYear;
+    if (doyMax[doy] == null || val > doyMax[doy]) doyMax[doy] = val;
+  }
+
+  const doys    = Object.keys(doyMax).map(Number).sort((a, b) => a - b);
+  const maxVals = doys.map(d => doyMax[d]);
+
+  const pct90 = (arr) => {
+    if (!arr.length) return null;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const idx = Math.ceil(0.9 * sorted.length) - 1;
+    return sorted[Math.max(0, idx)];
+  };
+
+  // For each DOY, gather maxima from the centred ±20 day window (wrapping year boundaries)
+  const n = doys.length;
+  return doys.map((doy, i) => {
+    const window = [];
+    for (let offset = -20; offset <= 20; offset++) {
+      // Wrap index around the year
+      const j = ((i + offset) % n + n) % n;
+      window.push(maxVals[j]);
+    }
+    return { day: doy, frontier: pct90(window) };
+  });
+}
+
 export default function TabLNG({ records, selectedYears, dateRange }) {
   const latestYear = Math.max(...selectedYears);
   const [areaYear, setAreaYear] = useState(latestYear);
@@ -104,6 +142,20 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
     }
     return Object.values(pivot).sort((a, b) => a.day - b.day);
   }, [records, selectedYears]);
+
+  // ── Effective capacity frontiers ───────────────────────────────────────────
+  const frontierAPLNG = useMemo(() => calcFrontier(records, 'map_aplng'),    [records]);
+  const frontierQCLNG = useMemo(() => calcFrontier(records, 'map_wgp_lng'),  [records]);
+  const frontierGLNG  = useMemo(() => calcFrontier(records, 'map_glng'),     [records]);
+
+  // Merge frontier values into each yoy dataset by DOY
+  const mergeF = (yoyData, frontier) => {
+    const fMap = Object.fromEntries(frontier.map(r => [r.day, r.frontier]));
+    return yoyData.map(r => ({ ...r, frontier: fMap[r.day] ?? null }));
+  };
+  const yoyAPLNGf = useMemo(() => mergeF(yoyAPLNG, frontierAPLNG), [yoyAPLNG, frontierAPLNG]);
+  const yoyQCLNGf = useMemo(() => mergeF(yoyQCLNG, frontierQCLNG), [yoyQCLNG, frontierQCLNG]);
+  const yoyGLNGf  = useMemo(() => mergeF(yoyGLNG,  frontierGLNG),  [yoyGLNG,  frontierGLNG]);
 
   // ── Area chart: single year, split by pipeline ────────────────────────────
   const areaData = useMemo(() => {
@@ -234,7 +286,7 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
           onExportXLSX={() => exportToExcel(records.filter(r => selectedYears.includes(r.year)))}
         >
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={yoyAPLNG} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
+            <LineChart data={yoyAPLNGf} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
               <CartesianGrid {...GRID_STYLE} />
               <XAxis dataKey="day" tickFormatter={dayLabel} ticks={MONTH_TICKS} {...AXIS_STYLE} />
               <YAxis {...AXIS_STYLE} tickFormatter={v => v.toLocaleString()} domain={[0, 'auto']} />
@@ -266,11 +318,17 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
                   dot={false} connectNulls
                 />
               ))}
+              <Line
+                type="monotone" dataKey="frontier" name="Effective frontier"
+                stroke="#ffffff" strokeWidth={1.5} strokeDasharray="4 2"
+                dot={false} connectNulls strokeOpacity={0.5}
+              />
             </LineChart>
           </ResponsiveContainer>
           <Legend items={[
             ...pipeLegend,
             { color: NAMEPLATE.aplng.color, label: `Nameplate capacity (9 Mtpa)` },
+            { color: '#ffffff', label: 'Effective frontier (90th pct, 40-day smoothed)', opacity: 0.5 },
           ]} />
         </ChartCard>
 
@@ -283,7 +341,7 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
           onExportXLSX={() => exportToExcel(records.filter(r => selectedYears.includes(r.year)))}
         >
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={yoyQCLNG} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
+            <LineChart data={yoyQCLNGf} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
               <CartesianGrid {...GRID_STYLE} />
               <XAxis dataKey="day" tickFormatter={dayLabel} ticks={MONTH_TICKS} {...AXIS_STYLE} />
               <YAxis {...AXIS_STYLE} tickFormatter={v => v.toLocaleString()} domain={[0, 'auto']} />
@@ -315,11 +373,17 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
                   dot={false} connectNulls
                 />
               ))}
+              <Line
+                type="monotone" dataKey="frontier" name="Effective frontier"
+                stroke="#ffffff" strokeWidth={1.5} strokeDasharray="4 2"
+                dot={false} connectNulls strokeOpacity={0.5}
+              />
             </LineChart>
           </ResponsiveContainer>
           <Legend items={[
             ...pipeLegend,
             { color: NAMEPLATE.qclng.color, label: `Nameplate capacity (8.5 Mtpa)` },
+            { color: '#ffffff', label: 'Effective frontier (90th pct, 40-day smoothed)', opacity: 0.5 },
           ]} />
         </ChartCard>
 
@@ -332,7 +396,7 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
           onExportXLSX={() => exportToExcel(records.filter(r => selectedYears.includes(r.year)))}
         >
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={yoyGLNG} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
+            <LineChart data={yoyGLNGf} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
               <CartesianGrid {...GRID_STYLE} />
               <XAxis dataKey="day" tickFormatter={dayLabel} ticks={MONTH_TICKS} {...AXIS_STYLE} />
               <YAxis {...AXIS_STYLE} tickFormatter={v => v.toLocaleString()} domain={[0, 'auto']} />
@@ -364,11 +428,17 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
                   dot={false} connectNulls
                 />
               ))}
+              <Line
+                type="monotone" dataKey="frontier" name="Effective frontier"
+                stroke="#ffffff" strokeWidth={1.5} strokeDasharray="4 2"
+                dot={false} connectNulls strokeOpacity={0.5}
+              />
             </LineChart>
           </ResponsiveContainer>
           <Legend items={[
             ...pipeLegend,
             { color: NAMEPLATE.glng.color, label: `Nameplate capacity (7.8 Mtpa)` },
+            { color: '#ffffff', label: 'Effective frontier (90th pct, 40-day smoothed)', opacity: 0.5 },
           ]} />
         </ChartCard>
       </div>

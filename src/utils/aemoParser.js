@@ -3,7 +3,12 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const AEMO_URL = 'https://www.nemweb.com.au/Reports/Current/GBB/GasBBActualFlowStorage.zip';
+// In dev (Vite proxy active) use /aemo-proxy to avoid CORS.
+// In production the direct URL is used; deploy behind a CORS-capable server or
+// configure your host's reverse proxy similarly.
+const IS_DEV = import.meta.env.DEV;
+const NEMWEB = IS_DEV ? '/aemo-proxy' : 'https://www.nemweb.com.au';
+const AEMO_URL = `${NEMWEB}/Reports/Current/GBB/GasBBActualFlowStorage.zip`;
 
 const SE_STATES = new Set(['VIC', 'NSW', 'SA', 'TAS']);
 
@@ -36,13 +41,9 @@ export async function fetchAEMOData(onProgress) {
   try {
     const response = await fetch(AEMO_URL);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('zip') && !contentType.includes('octet-stream')) {
-      throw new Error(`AEMO fetch blocked — nemweb.com.au is not yet whitelisted on this server. Ask Ash to whitelist it, or load a local GBB file via ↑ Load data.`);
-    }
     zipBuffer = await response.arrayBuffer();
   } catch (e) {
-    throw new Error(e.message.startsWith('AEMO fetch blocked') ? e.message : `Failed to download: ${e.message}`);
+    throw new Error(`Failed to download GBB actuals: ${e.message}. Try uploading the ZIP manually via "↑ Upload GBB Actuals".`);
   }
 
   onProgress?.('Unzipping...');
@@ -63,7 +64,7 @@ export async function fetchAEMOData(onProgress) {
 }
 
 // ── DWGM CSV fetch (nemweb INT310) ────────────────────────────────────────────
-const DWGM_URL = 'https://www.nemweb.com.au/REPORTS/CURRENT/VicGas/INT310_V4_PRICE_AND_WITHDRAWALS_1.CSV';
+const DWGM_URL = `${NEMWEB}/REPORTS/CURRENT/VicGas/INT310_V4_PRICE_AND_WITHDRAWALS_1.CSV`;
 
 function parseDwgmCsv(text) {
   // Columns: gas_date, schedule_interval, transmission_id, sched_inj_gj,
@@ -388,7 +389,7 @@ function finaliseDailyMap(dailyMap) {
 // established during analysis.  Returns an array of { date, gbb_se_total,
 // gbb_nsw, gbb_sa, gbb_tas, gbb_vic_implied, gbb_prod, gbb_qld_net, gbb_stor_net }.
 
-const GBB_NOM_URL = 'https://nemweb.com.au/Reports/Current/GBB/GasBBNominationAndForecast.zip';
+const GBB_NOM_URL = `${NEMWEB}/Reports/Current/GBB/GasBBNominationAndForecast.zip`;
 
 export async function fetchGBBNominations(onProgress) {
   onProgress?.('Downloading GBB nominations...');
@@ -397,13 +398,9 @@ export async function fetchGBBNominations(onProgress) {
   try {
     const response = await fetch(GBB_NOM_URL);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('zip') && !contentType.includes('octet-stream')) {
-      throw new Error('GBB nomination fetch blocked — nemweb.com.au not whitelisted. Upload the ZIP manually.');
-    }
     zipBuffer = await response.arrayBuffer();
   } catch (e) {
-    throw new Error(e.message.startsWith('GBB') ? e.message : `Failed to download nominations: ${e.message}`);
+    throw new Error(`Failed to download nominations: ${e.message}. Try uploading the ZIP manually.`);
   }
 
   onProgress?.('Unzipping nominations...');

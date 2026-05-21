@@ -44,6 +44,24 @@ const C = {
 const AXIS = { tick: { fill: C.muted, fontSize: 11 }, axisLine: false, tickLine: false };
 const GRID = { stroke: C.border, strokeDasharray: '3 3', vertical: false };
 
+// ── Forecast accuracy metrics ──────────────────────────────────────────────────
+// Computes R² and mean error (forecast − actual) over paired rows only.
+function calcAccuracy(data, predKey, actualKey) {
+  const pairs = data.filter(r => r[predKey] != null && r[actualKey] != null && r[actualKey] > 0);
+  if (pairs.length < 3) return null;
+  const n     = pairs.length;
+  const xs    = pairs.map(r => r[predKey]);
+  const ys    = pairs.map(r => r[actualKey]);
+  const mx    = xs.reduce((a, b) => a + b, 0) / n;
+  const my    = ys.reduce((a, b) => a + b, 0) / n;
+  const num   = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0);
+  const den   = Math.sqrt(xs.reduce((s, x) => s + (x - mx) ** 2, 0) * ys.reduce((s, y) => s + (y - my) ** 2, 0));
+  const r2    = den === 0 ? null : (num / den) ** 2;  // Pearson r²
+  const me    = xs.reduce((s, x, i) => s + Math.abs(x - ys[i]), 0) / n;
+  const mape  = pairs.reduce((s, r) => s + Math.abs((r[predKey] - r[actualKey]) / r[actualKey]), 0) / n * 100;
+  return { r2, me, mape, n };
+}
+
 // ── Weather regime classification ──────────────────────────────────────────────
 // DOY-normalised thresholds: [hdd_p67, wind_p33, wind_p67, solar_p33]
 // Calibrated from 2020-2025 historical data in Rebuild_Gas_Modelling.ipynb
@@ -114,14 +132,38 @@ const getThresholds = (dateStr, thresholds) => {
 };
 
 // ── Shared chart elements ──────────────────────────────────────────────────────
-const ChartCard = ({ title, subtitle, children, style = {} }) => (
+const AccuracyBadge = ({ acc }) => {
+  if (!acc) return null;
+  const meColor = acc.mape < 10 ? C.green : acc.mape < 20 ? C.orange : C.red;
+  const meSign  = acc.me > 0 ? '+' : '';
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>
+      <span style={{ color: C.dim }}>n={acc.n}</span>
+      <span style={{ color: C.dim }}>·</span>
+      <span style={{ color: C.muted }}>R²</span>
+      <span style={{ color: acc.r2 >= 0.9 ? C.green : acc.r2 >= 0.7 ? C.orange : C.red }}>
+        {acc.r2.toFixed(2)}
+      </span>
+      <span style={{ color: C.dim }}>·</span>
+      <span style={{ color: C.muted }}>MAE</span>
+      <span style={{ color: meColor }}>{acc.me.toFixed(0)} TJ</span>
+    </div>
+  );
+};
+
+const ChartCard = ({ title, subtitle, accuracy, children, style = {} }) => (
   <div style={{
     background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8,
     padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12, ...style
   }}>
-    <div>
-      <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 13, color: C.text }}>{title}</div>
-      {subtitle && <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{subtitle}</div>}
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+      <div>
+        <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 13, color: C.text }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{subtitle}</div>}
+      </div>
+      <div style={{ flexShrink: 0, paddingTop: 1 }}>
+        <AccuracyBadge acc={accuracy} />
+      </div>
     </div>
     {children}
   </div>
@@ -553,8 +595,10 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
       poe_band: (r[poeLoKey] != null && r[poeHiKey] != null) ? [r[poeLoKey], r[poeHiKey]] : null,
     }));
 
+    const accuracy = calcAccuracy(data, 'forecast', 'actual');
+
     return (
-      <ChartCard title={title} subtitle={subtitle}>
+      <ChartCard title={title} subtitle={subtitle} accuracy={accuracy}>
         <ResponsiveContainer width="100%" height={200}>
           <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             {/* Regime shading on forecast days */}
@@ -590,8 +634,9 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
       forecast: r[predKey],
       actual:   r[actualKey],
     }));
+    const accuracy = calcAccuracy(data, 'forecast', 'actual');
     return (
-      <ChartCard title={title} subtitle="Non-power TJ/day" style={{ flex: '1 1 calc(50% - 8px)', minWidth: 280 }}>
+      <ChartCard title={title} subtitle="Non-power TJ/day" accuracy={accuracy} style={{ flex: '1 1 calc(50% - 8px)', minWidth: 280 }}>
         <ResponsiveContainer width="100%" height={160}>
           <ComposedChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
             <CartesianGrid {...GRID} />
@@ -787,8 +832,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
     const rForecast = pearson(baccastWithActual.map(r => r.forecast), baccastWithActual.map(r => r.actual));
     const nomPairs  = data.filter(r => r.actual != null && r.actual > 0 && r.gbb_nom != null);
     const rNom      = pearson(nomPairs.map(r => r.gbb_nom), nomPairs.map(r => r.actual));
-    const fmtR  = (r) => r != null ? r.toFixed(3) : '—';
-    const rColor = (r) => r == null ? C.muted : r > 0.75 ? C.green : r > 0.5 ? C.orange : C.red;
+    const fmtR  = (r) => r != null ? r.toFixed(2) : '—';
+    const rColor = (r) => r == null ? C.muted : (r ** 2) > 0.56 ? C.green : (r ** 2) > 0.25 ? C.orange : C.red;
 
     return (
       <ChartCard
@@ -866,9 +911,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
           <div style={{ flex: '1 1 200px', paddingRight: 20 }}>
             <div style={{ fontSize: 10, color: C.muted, fontFamily: 'DM Mono, monospace', marginBottom: 3 }}>P50 vs Actual ({baccastWithActual.length} days)</div>
             <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
-              <span style={{ fontSize: 10, color: C.muted }}>r =</span>
-              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 16, fontWeight: 700, color: rColor(rForecast) }}>{fmtR(rForecast)}</span>
-              {rForecast != null && <span style={{ fontSize: 10, color: C.muted }}>r² = {(rForecast ** 2).toFixed(3)}</span>}
+              <span style={{ fontSize: 10, color: C.muted }}>R² =</span>
+              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 16, fontWeight: 700, color: rColor(rForecast) }}>{rForecast != null ? (rForecast ** 2).toFixed(2) : '—'}</span>
             </div>
           </div>
           <div style={{ width: 1, background: C.border, margin: '0 4px', alignSelf: 'stretch', minHeight: 36 }} />
@@ -877,9 +921,8 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
               {hasNom ? `GBB nomination vs Actual (${nomPairs.length} days)` : 'GBB nomination vs Actual'}
             </div>
             <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
-              <span style={{ fontSize: 10, color: C.muted }}>r =</span>
-              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 16, fontWeight: 700, color: hasNom ? rColor(rNom) : C.dim }}>{hasNom ? fmtR(rNom) : '—'}</span>
-              {hasNom && rNom != null && <span style={{ fontSize: 10, color: C.muted }}>r² = {(rNom ** 2).toFixed(3)}</span>}
+              <span style={{ fontSize: 10, color: C.muted }}>R² =</span>
+              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 16, fontWeight: 700, color: hasNom ? rColor(rNom) : C.dim }}>{hasNom && rNom != null ? (rNom ** 2).toFixed(2) : '—'}</span>
               {!hasNom && <span style={{ fontSize: 10, color: C.dim, fontStyle: 'italic' }}>load nominations to compute</span>}
             </div>
           </div>
