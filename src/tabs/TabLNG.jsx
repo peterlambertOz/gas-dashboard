@@ -157,16 +157,47 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
   const yoyQCLNGf = useMemo(() => mergeF(yoyQCLNG, frontierQCLNG), [yoyQCLNG, frontierQCLNG]);
   const yoyGLNGf  = useMemo(() => mergeF(yoyGLNG,  frontierGLNG),  [yoyGLNG,  frontierGLNG]);
 
-  // ── Area chart: single year, split by pipeline ────────────────────────────
+  // ── Area chart: single year, split by pipeline (Curtis Island supply only) ─
   const areaData = useMemo(() => {
     return records
       .filter(r => r.year === areaYear && ((r.map_aplng || 0) + (r.map_wgp_lng || 0) + (r.map_glng || 0)) > 0)
       .map(r => ({
-        date: r.date.substring(5),
+        date:  r.date.substring(5),
         aplng: r.map_aplng   || 0,
         qclng: r.map_wgp_lng || 0,
         glng:  r.map_glng    || 0,
       }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [records, areaYear]);
+
+  // ── QLD net flows dataset ──────────────────────────────────────────────────
+  // Sign convention: positive = gas leaving QLD, negative = gas entering QLD
+  //   LNG pipelines: always positive (gas flows QLD → Curtis Island for export)
+  //   SWQP net:  qld_supply − se_to_qld  (+ = QLD→Moomba export, − = SE→QLD backflow)
+  //   NGP net:   map_ngp  (AEMO "TransferOut NGP QLD" — positive = gas leaving QLD, no sign flip)
+  // Each bidirectional flow is split into _pos (≥0, stacks above zero) and
+  // _neg (≤0, stacks below zero) so Recharts can render them independently.
+  const netFlowData = useMemo(() => {
+    return records
+      .filter(r => r.year === areaYear && ((r.map_aplng || 0) + (r.map_wgp_lng || 0) + (r.map_glng || 0)) > 0)
+      .map(r => {
+        const aplng    = r.map_aplng   || 0;
+        const qclng    = r.map_wgp_lng || 0;
+        const glng     = r.map_glng    || 0;
+        const swqp_net = (r.qld_supply || 0) - (r.se_to_qld || 0);
+        const ngp_qld  =   r.map_ngp    || 0;   // TransferOut NGP QLD: positive = gas leaving QLD → no flip needed
+        return {
+          date:     r.date.substring(5),
+          aplng,
+          qclng,
+          glng,
+          swqp_pos: Math.max(0, swqp_net),      // QLD→Moomba export portion
+          swqp_neg: Math.min(0, swqp_net),      // SE→QLD backflow portion
+          ngp_pos:  Math.max(0, ngp_qld),       // QLD→NT export portion (rare)
+          ngp_neg:  Math.min(0, ngp_qld),       // NT→QLD import portion
+          net:      aplng + qclng + glng + swqp_net + ngp_qld,
+        };
+      })
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [records, areaYear]);
 
@@ -515,6 +546,92 @@ export default function TabLNG({ records, selectedYears, dateRange }) {
           { color: PIPE_COLORS.aplng, label: 'APLNG Pipeline (Australia Pacific LNG)' },
           { color: PIPE_COLORS.qclng, label: 'QCLNG Pipeline / WGP (QGC / Shell)' },
           { color: PIPE_COLORS.glng,  label: 'GLNG Pipeline (Gladstone LNG / Santos)' },
+        ]} />
+      </ChartCard>
+
+      {/* ── QLD net flows: stacked exports above zero, imports below, net line ─ */}
+      <ChartCard
+        id="chart-lng-qld-net-flows"
+        title={`${areaYear} QLD Net Flows`}
+        subtitle="Gas leaving QLD above zero, gas entering QLD below zero (TJ/day). Net line = LNG exports + SWQP net + NGP net."
+        onExportPPT={() => handleExportPPT('chart-lng-qld-net-flows', `${areaYear} QLD Net Flows`)}
+        onExportXLSX={() => exportToExcel(records.filter(r => r.year === areaYear))}
+      >
+        {/* Year selector — shares areaYear state with the pipeline split chart */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace' }}>Show year:</span>
+          {availableYears.map(y => (
+            <button
+              key={y}
+              onClick={() => setAreaYear(y)}
+              style={{
+                padding: '3px 12px',
+                borderRadius: 4,
+                border: `1px solid ${areaYear === y ? YEAR_COLORS[y] || '#888' : 'var(--border)'}`,
+                background: areaYear === y ? (YEAR_COLORS[y] || '#888') + '22' : 'transparent',
+                color: areaYear === y ? YEAR_COLORS[y] || '#888' : 'var(--text-muted)',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontFamily: 'DM Mono, monospace',
+                fontWeight: areaYear === y ? 600 : 400,
+                transition: 'all 0.15s',
+              }}
+            >
+              {y}
+            </button>
+          ))}
+        </div>
+
+        <ResponsiveContainer width="100%" height={340}>
+          <ComposedChart data={netFlowData} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
+            <CartesianGrid {...GRID_STYLE} />
+            <XAxis
+              dataKey="date"
+              tickFormatter={fmtDate}
+              interval={Math.max(1, Math.floor(netFlowData.length / 12))}
+              {...AXIS_STYLE}
+            />
+            <YAxis {...AXIS_STYLE} tickFormatter={v => v.toLocaleString()} />
+            <Tooltip
+              content={
+                <CustomTooltip
+                  formatter={(v, name) => `${Math.round(v).toLocaleString()} TJ`}
+                  labelFormatter={fmtDate}
+                />
+              }
+            />
+            <ReferenceLine y={0} stroke="var(--border)" strokeWidth={1.5} />
+
+            {/* ── Positive stack (above zero): LNG exports + SWQP/NGP outflows ── */}
+            <Area type="monotone" dataKey="aplng"    stackId="pos" name="APLNG export"
+              fill={PIPE_COLORS.aplng} stroke={PIPE_COLORS.aplng} fillOpacity={0.8} />
+            <Area type="monotone" dataKey="qclng"    stackId="pos" name="QCLNG export"
+              fill={PIPE_COLORS.qclng} stroke={PIPE_COLORS.qclng} fillOpacity={0.8} />
+            <Area type="monotone" dataKey="glng"     stackId="pos" name="GLNG export"
+              fill={PIPE_COLORS.glng} stroke={PIPE_COLORS.glng} fillOpacity={0.8} />
+            <Area type="monotone" dataKey="swqp_pos" stackId="pos" name="SWQP → Moomba (export)"
+              fill="#c084fc" stroke="#c084fc" fillOpacity={0.8} />
+            <Area type="monotone" dataKey="ngp_pos"  stackId="pos" name="NGP → NT (export)"
+              fill="#fb923c" stroke="#fb923c" fillOpacity={0.8} />
+
+            {/* ── Negative stack (below zero): SWQP/NGP inflows into QLD ──────── */}
+            <Area type="monotone" dataKey="swqp_neg" stackId="neg" name="SWQP ← SE backflow (import)"
+              fill="#c084fc" stroke="#c084fc" fillOpacity={0.6} />
+            <Area type="monotone" dataKey="ngp_neg"  stackId="neg" name="NGP ← NT (import)"
+              fill="#fb923c" stroke="#fb923c" fillOpacity={0.6} />
+
+            {/* ── Net QLD flow line ─────────────────────────────────────────────── */}
+            <Line type="monotone" dataKey="net" name="Net QLD flow"
+              stroke="#e6edf3" strokeWidth={2} dot={false} connectNulls />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <Legend items={[
+          { color: PIPE_COLORS.aplng, label: 'APLNG Pipeline export (+ above zero)' },
+          { color: PIPE_COLORS.qclng, label: 'QCLNG / WGP export (+ above zero)' },
+          { color: PIPE_COLORS.glng,  label: 'GLNG Pipeline export (+ above zero)' },
+          { color: '#c084fc',         label: 'SWQP: QLD→Moomba above zero / SE→QLD backflow below zero' },
+          { color: '#fb923c',         label: 'NGP: QLD→NT export above zero / NT→QLD import below zero (AEMO TransferOut NGP QLD)' },
+          { color: '#e6edf3',         label: 'Net QLD flow (LNG exports + SWQP net + NGP net)' },
         ]} />
       </ChartCard>
 
