@@ -3,11 +3,10 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-// In dev (Vite proxy active) use /aemo-proxy to avoid CORS.
-// In production the direct URL is used; deploy behind a CORS-capable server or
-// configure your host's reverse proxy similarly.
-const IS_DEV = import.meta.env.DEV;
-const NEMWEB = IS_DEV ? '/aemo-proxy' : 'https://www.nemweb.com.au';
+// Use a relative proxy path for all environments — avoids CORS on direct browser
+// fetches to nemweb.com.au. In dev, Vite handles /aemo-proxy/; in production,
+// Nginx handles it. See nginx.conf and vite.config.js.
+const NEMWEB   = '/aemo-proxy';
 const AEMO_URL = `${NEMWEB}/Reports/Current/GBB/GasBBActualFlowStorage.zip`;
 
 const SE_STATES = new Set(['VIC', 'NSW', 'SA', 'TAS']);
