@@ -31,6 +31,24 @@ if (Test-Path $forecastScript) {
 }
 Write-Host ""
 
+# Copy forecast CSVs to public/data/ so the local dev server can serve them
+$today          = Get-Date -Format 'yyyyMMdd'
+$forecastSrcDir = "C:\Users\peter\Python\data\forecasts"
+$publicDataDir  = Join-Path $dashDir "public\data"
+
+New-Item -ItemType Directory -Force -Path $publicDataDir | Out-Null
+
+foreach ($f in @("gas_forecast_$today.csv", "gas_forecast_hourly_$today.csv")) {
+    $src = Join-Path $forecastSrcDir $f
+    if (Test-Path $src) {
+        Copy-Item $src (Join-Path $publicDataDir $f) -Force
+        Write-Host "  Copied $f → public\data\" -ForegroundColor Gray
+    } else {
+        Write-Host "  WARNING: $f not found in $forecastSrcDir" -ForegroundColor Yellow
+    }
+}
+Write-Host ""
+
 # Step 2: Git commit and push
 Write-Host "-- Step 2: Git commit and push --------------" -ForegroundColor Yellow
 
