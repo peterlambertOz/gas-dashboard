@@ -27,8 +27,11 @@ import {
 import { exportToPowerPoint, exportToExcel } from '../utils/exportUtils';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const STTM_URL  = '/data/sttm-price-and-withdrawals.xlsx';
-const DWGM_URL  = '/data/dwgm-prices-and-demand.xlsx';
+// Files are downloaded fresh at deploy time by update-market-data.ps1 into
+// public/data/ and served as static assets by nginx. No proxy required.
+const STTM_URL   = '/data/sttm-price-and-withdrawals.xlsx';
+const DWGM_URL   = '/data/dwgm-prices-and-demand.xlsx';
+const NEMWEB_URL = '/data/int310_v4_price_and_withdrawals_1.csv';
 
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONTH_TICKS  = [1, 32, 61, 92, 122, 153, 183, 214, 245, 275, 306, 336];
@@ -72,9 +75,12 @@ function toDateStr(val) {
 
 function dayOfYear(dateStr) {
   if (!dateStr) return null;
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const start = new Date(y, 0, 0);
-  const date  = new Date(y, m - 1, d);
+  const [, m, d] = dateStr.split('-').map(Number);
+  // Normalise onto a fixed leap-year (2024) so all years share identical
+  // month boundaries on the YoY x-axis. Without this, non-leap years
+  // (2025, 2026…) plot 1 day left of 2024 after Feb 28.
+  const start = new Date(2024, 0, 0);   // Dec 31 2023
+  const date  = new Date(2024, m - 1, d);
   return Math.floor((date - start) / 86400000);
 }
 
@@ -149,28 +155,95 @@ function parseDwgm(workbook, use6amOnly) {
   return { prices, demand };
 }
 
+// ── Parse NEMWEB INT310 CSV (rolling 365 d + ~1 d forecast) ───────────────────
+// Columns: gas_date (DD MMM YYYY), schedule_interval (1–5), transmission_id,
+//          sched_inj_gj, sched_wdl_gj, price_value, administered_price,
+//          actual_wdl_gj, actual_inj_gj
+// schedule_interval 1 = 6 am schedule (equivalent to Hour=6 in DWGM XLSX)
+function parseNemwebCsv(text, use6amOnly) {
+  const prices = {};   // { 'YYYY-MM-DD': number }
+  const demand = {};   // { 'YYYY-MM-DD': number }   actual_wdl_gj in GJ
+  const forecast = {}; // { 'YYYY-MM-DD': true }      no actual data yet
+
+  const buckets = {};  // { dateStr: number[] } for averaging
+
+  const lines = text.split('\n');
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const parts = line.split(',');
+    if (parts.length < 6) continue;
+
+    // gas_date: "16 Jun 2026"
+    const raw = parts[0].trim();
+    let dateStr = null;
+    try {
+      const dt = new Date(`${raw}`);
+      if (!isNaN(dt)) {
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth() + 1).padStart(2, '0');
+        const d = String(dt.getDate()).padStart(2, '0');
+        dateStr = `${y}-${m}-${d}`;
+      }
+    } catch { continue; }
+    if (!dateStr) continue;
+
+    const interval  = Number(parts[1].trim());
+    const priceVal  = parts[5].trim();
+    const actualWdl = parts[7]?.trim();
+
+    if (use6amOnly && interval !== 1) continue;
+
+    const price = priceVal !== '' ? Number(priceVal) : null;
+    if (price != null && !isNaN(price)) {
+      if (!buckets[dateStr]) buckets[dateStr] = [];
+      buckets[dateStr].push(price);
+    }
+
+    // actual_wdl_gj — same value repeated across all 5 intervals; store once
+    if (!(dateStr in demand)) {
+      if (actualWdl && actualWdl !== '') {
+        demand[dateStr] = Number(actualWdl);
+      } else {
+        forecast[dateStr] = true;
+      }
+    }
+  }
+
+  for (const [d, vals] of Object.entries(buckets)) {
+    prices[d] = vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+
+  return { prices, demand, forecast };
+}
+
 // ── Merge into unified daily records ──────────────────────────────────────────
-function buildDailyRecords(sttmData, dwgmPrices, dwgmDemand) {
+function buildDailyRecords(sttmData, dwgmPrices, dwgmDemand, nemwebPrices, nemwebDemand, nemwebForecast) {
   const allDates = new Set([
     ...Object.keys(sttmData),
     ...Object.keys(dwgmPrices),
+    ...Object.keys(nemwebPrices),
   ]);
   const records = [];
   for (const date of allDates) {
     const [y, m] = date.split('-').map(Number);
-    const sttm   = sttmData[date]   || {};
-    const dwgm   = dwgmPrices[date] ?? null;
-    const dem    = dwgmDemand[date] || null;
+    const sttm = sttmData[date] || {};
+    // XLSX price takes priority; fall back to NEMWEB CSV for dates beyond XLSX coverage
+    const dwgm = dwgmPrices[date] ?? nemwebPrices[date] ?? null;
+    // Demand: XLSX dem takes priority; NEMWEB actual_wdl_gj is in GJ, convert to TJ (/1000)
+    const dem  = dwgmDemand[date] ?? null;
+    const nemWdlTj = nemwebDemand[date] != null ? nemwebDemand[date] / 1000 : null;
     records.push({
       date,
-      year:     y,
-      month:    m,
-      dayOfYear: dayOfYear(date),
+      year:       y,
+      month:      m,
+      dayOfYear:  dayOfYear(date),
       dwgm,
+      isForecast: !!(nemwebForecast[date] && !dwgmPrices[date]),
       syd:  sttm.syd ?? null,
       adl:  sttm.adl ?? null,
       bri:  sttm.bri ?? null,
-      dwgmDemand: dem?.total     ?? null,
+      dwgmDemand: dem?.total     ?? nemWdlTj ?? null,
       dwgmGpg:    dem?.gpg       ?? null,
       dwgmSys:    dem?.sysDemand ?? null,
     });
@@ -197,14 +270,18 @@ function StatusBadge({ ok, label }) {
 export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp }) {
   // ── Data state ───────────────────────────────────────────────────────────────
   const [priceRecords, setPriceRecords] = useState([]);
-  const [loading, setLoading]           = useState({ sttm: false, dwgm: false });
-  const [loaded,  setLoaded]            = useState({ sttm: false, dwgm: false });
-  const [error,   setError]             = useState({ sttm: null,  dwgm: null  });
+  const [loading, setLoading]           = useState({ sttm: false, dwgm: false, nemweb: false });
+  const [loaded,  setLoaded]            = useState({ sttm: false, dwgm: false, nemweb: false });
+  const [error,   setError]             = useState({ sttm: null,  dwgm: null,  nemweb: null  });
+  const [lastFetched, setLastFetched]   = useState(null);
 
   // Raw parsed data stores (merged when both present)
-  const [sttmData,    setSttmData]    = useState({});
-  const [dwgmPrices,  setDwgmPrices]  = useState({});
-  const [dwgmDemand,  setDwgmDemand]  = useState({});
+  const [sttmData,      setSttmData]      = useState({});
+  const [dwgmPrices,    setDwgmPrices]    = useState({});
+  const [dwgmDemand,    setDwgmDemand]    = useState({});
+  const [nemwebPrices,  setNemwebPrices]  = useState({});
+  const [nemwebDemand,  setNemwebDemand]  = useState({});
+  const [nemwebForecast,setNemwebForecast]= useState({});
 
   // Sync DWGM prices from App.jsx fetch (CSV) into internal state
   useEffect(() => {
@@ -212,13 +289,6 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
     setDwgmPrices(dwgmPricesProp);
     setLoaded(prev => ({ ...prev, dwgm: true }));
   }, [dwgmPricesProp]);
-
-  // ── Auto-fetch on mount ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!loaded.sttm && !loaded.dwgm && !loading.sttm && !loading.dwgm) {
-      fetchBoth();
-    }
-  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [use6am,        setUse6am]        = useState(false);
@@ -228,31 +298,43 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
 
   const latestYear = selectedYears.length ? Math.max(...selectedYears) : new Date().getFullYear();
 
-  // ── Rebuild records whenever source data or 6am toggle changes ───────────────
-  useMemo(() => {
-    const recs = buildDailyRecords(sttmData, dwgmPrices, dwgmDemand);
-    setPriceRecords(recs);
-    if (!spreadYear && recs.length) {
-      const yrs = [...new Set(recs.map(r => r.year))].sort();
-      setSpreadYear(yrs[yrs.length - 1]);
-    }
-  }, [sttmData, dwgmPrices, dwgmDemand]);
-
   // ── Re-parse DWGM prices when 6am toggle changes ─────────────────────────────
   const [rawDwgmWb, setRawDwgmWb] = useState(null);
-  useMemo(() => {
+  useEffect(() => {
     if (!rawDwgmWb) return;
     const { prices, demand } = parseDwgm(rawDwgmWb, use6am);
     setDwgmPrices(prices);
     setDwgmDemand(demand);
   }, [rawDwgmWb, use6am]);
 
+  // Re-parse NEMWEB CSV when 6am toggle changes
+  const [rawNemwebText, setRawNemwebText] = useState(null);
+  useEffect(() => {
+    if (!rawNemwebText) return;
+    const { prices, demand, forecast } = parseNemwebCsv(rawNemwebText, use6am);
+    setNemwebPrices(prices);
+    setNemwebDemand(demand);
+    setNemwebForecast(forecast);
+  }, [rawNemwebText, use6am]);
+
+  // ── Rebuild records whenever source data changes ──────────────────────────────
+  useEffect(() => {
+    const recs = buildDailyRecords(sttmData, dwgmPrices, dwgmDemand, nemwebPrices, nemwebDemand, nemwebForecast);
+    setPriceRecords(recs);
+    if (!spreadYear && recs.length) {
+      const yrs = [...new Set(recs.map(r => r.year))].sort();
+      setSpreadYear(yrs[yrs.length - 1]);
+    }
+  }, [sttmData, dwgmPrices, dwgmDemand, nemwebPrices, nemwebDemand, nemwebForecast]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Fetch helpers ─────────────────────────────────────────────────────────────
   const fetchAndParse = useCallback(async (url, type) => {
     setLoading(prev => ({ ...prev, [type]: true }));
     setError(prev => ({ ...prev, [type]: null }));
     try {
-      const res = await fetch(url);
+      // Static files are refreshed at deploy time — bust the browser cache with
+      // a timestamp so the dashboard always reads the file written by the last deploy.
+      const res = await fetch(`${url}?_=${Date.now()}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const buf = await res.arrayBuffer();
       const wb  = XLSX.read(buf, { type: 'array', cellDates: true });
@@ -263,10 +345,28 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
         setRawDwgmWb(wb);
         setLoaded(prev => ({ ...prev, dwgm: true }));
       }
+      setLastFetched(new Date());
     } catch (e) {
       setError(prev => ({ ...prev, [type]: e.message }));
     } finally {
       setLoading(prev => ({ ...prev, [type]: false }));
+    }
+  }, []);
+
+  const fetchNemwebCsv = useCallback(async () => {
+    setLoading(prev => ({ ...prev, nemweb: true }));
+    setError(prev => ({ ...prev, nemweb: null }));
+    try {
+      const res = await fetch(`${NEMWEB_URL}?_=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      setRawNemwebText(text);
+      setLoaded(prev => ({ ...prev, nemweb: true }));
+      setLastFetched(new Date());
+    } catch (e) {
+      setError(prev => ({ ...prev, nemweb: e.message }));
+    } finally {
+      setLoading(prev => ({ ...prev, nemweb: false }));
     }
   }, []);
 
@@ -322,7 +422,8 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
   const fetchBoth = useCallback(() => {
     fetchAndParse(STTM_URL, 'sttm');
     fetchAndParse(DWGM_URL, 'dwgm');
-  }, [fetchAndParse]);
+    fetchNemwebCsv();
+  }, [fetchAndParse, fetchNemwebCsv]);
 
   // ── Auto-fetch on mount ──────────────────────────────────────────────────────
   useEffect(() => { fetchBoth(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -387,8 +488,9 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
   }, [priceRecords, spreadYear, latestYear]);
 
   // KPIs — 30-day rolling average vs prior 30d for each hub
+  // (excludes forecast rows so today's scheduled price doesn't skew the average)
   const kpis = useMemo(() => {
-    const sorted = [...priceRecords].sort((a, b) => b.date.localeCompare(a.date));
+    const sorted = [...priceRecords].filter(r => !r.isForecast).sort((a, b) => b.date.localeCompare(a.date));
     const recent = sorted.slice(0, 30);
     const prior  = sorted.slice(30, 60);
     const avg = (rows, hub) => {
@@ -401,6 +503,12 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
       prior:   avg(prior,  hub),
     }));
   }, [priceRecords]);
+
+  // Day-of-year at which DWGM data transitions from settled to forecast (for ReferenceLine)
+  const forecastFromDay = useMemo(() => {
+    const first = priceRecords.find(r => r.isForecast && r.year === latestYear);
+    return first ? first.dayOfYear : null;
+  }, [priceRecords, latestYear]);
 
   // ── Styles ───────────────────────────────────────────────────────────────────
   const btnStyle = (active, color = '#388bfd') => ({
@@ -451,9 +559,11 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
         <div style={{ display: 'flex', gap: 8 }}>
           <StatusBadge ok={loaded.sttm} label="STTM" />
           <StatusBadge ok={loaded.dwgm} label="DWGM" />
+          <StatusBadge ok={loaded.nemweb} label="NEMWEB" />
         </div>
-        {error.sttm && <div style={{ color: '#f85149', fontSize: 12 }}>STTM: {error.sttm}</div>}
-        {error.dwgm && <div style={{ color: '#f85149', fontSize: 12 }}>DWGM: {error.dwgm}</div>}
+        {error.sttm   && <div style={{ color: '#f85149', fontSize: 12 }}>STTM: {error.sttm}</div>}
+        {error.dwgm   && <div style={{ color: '#f85149', fontSize: 12 }}>DWGM: {error.dwgm}</div>}
+        {error.nemweb && <div style={{ color: '#f85149', fontSize: 12 }}>NEMWEB: {error.nemweb}</div>}
       </div>
     );
   }
@@ -469,14 +579,20 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <StatusBadge ok={loaded.sttm} label="STTM" />
         <StatusBadge ok={loaded.dwgm} label="DWGM" />
+        <StatusBadge ok={loaded.nemweb} label="NEMWEB" />
         <div style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>
           {priceRecords.length.toLocaleString()} daily records · {availableYears[0]}–{availableYears[availableYears.length - 1]}
+          {lastFetched && (
+            <span style={{ marginLeft: 8, opacity: 0.7 }}>
+              · fetched {lastFetched.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
         </div>
 
         {/* Refresh */}
-        <button onClick={fetchBoth} disabled={loading.sttm || loading.dwgm}
+        <button onClick={fetchBoth} disabled={loading.sttm || loading.dwgm || loading.nemweb}
           style={{ ...btnStyle(false, '#388bfd'), marginLeft: 'auto' }}>
-          {loading.sttm || loading.dwgm ? 'Fetching…' : '⟳ Refresh'}
+          {loading.sttm || loading.dwgm || loading.nemweb ? 'Fetching…' : '⟳ Refresh'}
         </button>
 
         {/* Upload missing file */}
@@ -496,6 +612,15 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
           </div>
         )}
       </div>
+
+      {/* ── Inline error notices ─────────────────────────────────────────────── */}
+      {(error.sttm || error.dwgm || error.nemweb) && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {error.sttm   && <span style={{ color: '#f85149', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>STTM: {error.sttm}</span>}
+          {error.dwgm   && <span style={{ color: '#f85149', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>DWGM: {error.dwgm}</span>}
+          {error.nemweb && <span style={{ color: '#f85149', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>NEMWEB: {error.nemweb}</span>}
+        </div>
+      )}
 
       {/* ── KPI Strip ───────────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
@@ -543,10 +668,16 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
                     labelFormatter={dayToFullLabel}
                   />
                 } />
+                {/* Dashed vertical line marking start of forecast on DWGM chart */}
+                {hub === 'dwgm' && forecastFromDay != null && (
+                  <ReferenceLine x={forecastFromDay} stroke="#888" strokeDasharray="4 3"
+                    label={{ value: 'forecast', position: 'insideTopRight', fontSize: 10, fill: '#888' }} />
+                )}
                 {selectedYears.map(y => (
                   <Line key={y} type="monotone" dataKey={y} name={String(y)}
                     stroke={YEAR_COLORS[y] || '#888'}
                     strokeWidth={y === latestYear ? 2.5 : 1.5}
+                    strokeDasharray={hub === 'dwgm' && y === latestYear && forecastFromDay != null ? undefined : undefined}
                     dot={false} connectNulls
                   />
                 ))}

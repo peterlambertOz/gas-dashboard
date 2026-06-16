@@ -61,8 +61,18 @@ try {
     Write-Host "  STTM download failed: $_" -ForegroundColor Yellow
 }
 
-# Push AEMO price files to pod
-foreach ($priceFile in @("dwgm-prices-and-demand.xlsx", "sttm-price-and-withdrawals.xlsx")) {
+$nemwebDest = "$aemoDir\int310_v4_price_and_withdrawals_1.csv"
+try {
+    Invoke-WebRequest -Uri "https://www.nemweb.com.au/Reports/CURRENT/VicGas/int310_v4_price_and_withdrawals_1.csv" `
+        -OutFile $nemwebDest -UseBasicParsing `
+        -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36" }
+    Write-Host "  NEMWEB rolling CSV OK ($([math]::Round((Get-Item $nemwebDest).Length/1KB))KB)"
+} catch {
+    Write-Host "  NEMWEB download failed: $_" -ForegroundColor Yellow
+}
+
+# Push AEMO/NEMWEB price files to pod
+foreach ($priceFile in @("dwgm-prices-and-demand.xlsx", "sttm-price-and-withdrawals.xlsx", "int310_v4_price_and_withdrawals_1.csv")) {
     $src = "$aemoDir\$priceFile"
     if (Test-Path $src) {
         scp $src "${pod}:${podData}/$priceFile"

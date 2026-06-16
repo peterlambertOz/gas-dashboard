@@ -59,7 +59,7 @@ foreach ($file in @("gas_historical_poe.json", "gas_historical_traces.json")) {
 }
 
 # AEMO price files (downloaded by update-sttm.ps1)
-foreach ($file in @("dwgm-prices-and-demand.xlsx", "sttm-price-and-withdrawals.xlsx")) {
+foreach ($file in @("dwgm-prices-and-demand.xlsx", "sttm-price-and-withdrawals.xlsx", "int310_v4_price_and_withdrawals_1.csv")) {
     Deploy-DataFile "$forecastsDir\$file"
 }
 
