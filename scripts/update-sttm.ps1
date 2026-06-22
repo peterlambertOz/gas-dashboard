@@ -51,6 +51,8 @@ if (-not $sttmFile) {
     if ($LASTEXITCODE -eq 0) { Write-Host "  OK" } else { Write-Host "  FAILED" }
 }
 
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
 # ── Download AEMO + NEMWEB market data files ──────────────────────────────────
 Write-Host "Downloading market data files..."
 
@@ -71,9 +73,22 @@ Download-MarketFile `
     "int310_v4_price_and_withdrawals_1.csv" `
     "NEMWEB DWGM rolling 365 d"
 
-# ── Push all three market data files to pod ───────────────────────────────────
+# ── Accumulate within-month STTM data from rolling 7-day NEMWEB CSVs ─────────
+Write-Host "Updating STTM recent data (within-month accumulator)..."
+& "$scriptDir\Merge-SttmRecent.ps1" `
+    -ForecastsDir    $forecastsDir `
+    -LocalPublicData $localPublicData
+
+# Deploy sttm-recent.json to pod (alongside the XLSX files below)
+
+# ── Push all market data files to pod ────────────────────────────────────────
 Write-Host "Pushing market data files to pod..."
-foreach ($priceFile in @("dwgm-prices-and-demand.xlsx", "sttm-price-and-withdrawals.xlsx", "int310_v4_price_and_withdrawals_1.csv")) {
+foreach ($priceFile in @(
+    "dwgm-prices-and-demand.xlsx",
+    "sttm-price-and-withdrawals.xlsx",
+    "int310_v4_price_and_withdrawals_1.csv",
+    "sttm-recent.json"
+)) {
     $src = "$forecastsDir\$priceFile"
     if (Test-Path $src) {
         scp $src "${pod}:${podData}/$priceFile"
