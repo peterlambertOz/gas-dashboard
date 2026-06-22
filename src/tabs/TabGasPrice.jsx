@@ -27,11 +27,12 @@ import {
 import { exportToPowerPoint, exportToExcel } from '../utils/exportUtils';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-// Files are downloaded fresh at deploy time by update-market-data.ps1 into
-// public/data/ and served as static assets by nginx. No proxy required.
-const STTM_URL   = '/data/sttm-price-and-withdrawals.xlsx';
-const DWGM_URL   = '/data/dwgm-prices-and-demand.xlsx';
-const NEMWEB_URL = '/data/int310_v4_price_and_withdrawals_1.csv';
+// Files are downloaded fresh at deploy time by update-sttm.ps1 into both
+// public/data/ (local dev) and the pod, then served as static assets by nginx.
+const STTM_URL        = '/data/sttm-price-and-withdrawals.xlsx';
+const DWGM_URL        = '/data/dwgm-prices-and-demand.xlsx';
+const NEMWEB_URL      = '/data/int310_v4_price_and_withdrawals_1.csv';
+const STTM_RECENT_URL = '/data/sttm-recent.json';  // weekly accumulator, fills end-of-month gap
 
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONTH_TICKS  = [1, 32, 61, 92, 122, 153, 183, 214, 245, 275, 306, 336];
@@ -218,31 +219,43 @@ function parseNemwebCsv(text, use6amOnly) {
 }
 
 // ── Merge into unified daily records ──────────────────────────────────────────
-function buildDailyRecords(sttmData, dwgmPrices, dwgmDemand, nemwebPrices, nemwebDemand, nemwebForecast) {
+// Priority per date:
+//   STTM price:  XLSX (monthly, authoritative) > sttm-recent.json (weekly accumulator)
+//   DWGM price:  DWGM XLSX > NEMWEB INT310 rolling CSV
+//   Demand:      DWGM XLSX > NEMWEB actual_wdl_gj (converted GJ→TJ)
+function buildDailyRecords(sttmData, sttmRecent, dwgmPrices, dwgmDemand, nemwebPrices, nemwebDemand, nemwebForecast) {
   const allDates = new Set([
     ...Object.keys(sttmData),
+    ...Object.keys(sttmRecent),
     ...Object.keys(dwgmPrices),
     ...Object.keys(nemwebPrices),
   ]);
   const records = [];
   for (const date of allDates) {
     const [y, m] = date.split('-').map(Number);
-    const sttm = sttmData[date] || {};
-    // XLSX price takes priority; fall back to NEMWEB CSV for dates beyond XLSX coverage
-    const dwgm = dwgmPrices[date] ?? nemwebPrices[date] ?? null;
-    // Demand: XLSX dem takes priority; NEMWEB actual_wdl_gj is in GJ, convert to TJ (/1000)
-    const dem  = dwgmDemand[date] ?? null;
+    // XLSX is authoritative; sttm-recent fills the current-month gap
+    const xlsxDay    = sttmData[date]   || {};
+    const recentDay  = sttmRecent[date] || {};
+    const syd  = xlsxDay.syd  ?? recentDay.syd  ?? null;
+    const adl  = xlsxDay.adl  ?? recentDay.adl  ?? null;
+    const bri  = xlsxDay.bri  ?? recentDay.bri  ?? null;
+    // Flag days sourced only from the recent accumulator (not yet in XLSX)
+    const isSttmRecent = (syd !== null || adl !== null || bri !== null)
+                      && !xlsxDay.syd && !xlsxDay.adl && !xlsxDay.bri;
+
+    const dwgm     = dwgmPrices[date] ?? nemwebPrices[date] ?? null;
+    const dem      = dwgmDemand[date] ?? null;
     const nemWdlTj = nemwebDemand[date] != null ? nemwebDemand[date] / 1000 : null;
+
     records.push({
       date,
-      year:       y,
-      month:      m,
-      dayOfYear:  dayOfYear(date),
+      year:         y,
+      month:        m,
+      dayOfYear:    dayOfYear(date),
       dwgm,
-      isForecast: !!(nemwebForecast[date] && !dwgmPrices[date]),
-      syd:  sttm.syd ?? null,
-      adl:  sttm.adl ?? null,
-      bri:  sttm.bri ?? null,
+      isForecast:   !!(nemwebForecast[date] && !dwgmPrices[date]),
+      isSttmRecent,
+      syd, adl, bri,
       dwgmDemand: dem?.total     ?? nemWdlTj ?? null,
       dwgmGpg:    dem?.gpg       ?? null,
       dwgmSys:    dem?.sysDemand ?? null,
@@ -270,18 +283,19 @@ function StatusBadge({ ok, label }) {
 export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp }) {
   // ── Data state ───────────────────────────────────────────────────────────────
   const [priceRecords, setPriceRecords] = useState([]);
-  const [loading, setLoading]           = useState({ sttm: false, dwgm: false, nemweb: false });
-  const [loaded,  setLoaded]            = useState({ sttm: false, dwgm: false, nemweb: false });
-  const [error,   setError]             = useState({ sttm: null,  dwgm: null,  nemweb: null  });
+  const [loading, setLoading]           = useState({ sttm: false, dwgm: false, nemweb: false, sttmRecent: false });
+  const [loaded,  setLoaded]            = useState({ sttm: false, dwgm: false, nemweb: false, sttmRecent: false });
+  const [error,   setError]             = useState({ sttm: null,  dwgm: null,  nemweb: null,  sttmRecent: null  });
   const [lastFetched, setLastFetched]   = useState(null);
 
   // Raw parsed data stores (merged when both present)
-  const [sttmData,      setSttmData]      = useState({});
-  const [dwgmPrices,    setDwgmPrices]    = useState({});
-  const [dwgmDemand,    setDwgmDemand]    = useState({});
-  const [nemwebPrices,  setNemwebPrices]  = useState({});
-  const [nemwebDemand,  setNemwebDemand]  = useState({});
-  const [nemwebForecast,setNemwebForecast]= useState({});
+  const [sttmData,       setSttmData]       = useState({});
+  const [sttmRecent,     setSttmRecent]     = useState({});
+  const [dwgmPrices,     setDwgmPrices]     = useState({});
+  const [dwgmDemand,     setDwgmDemand]     = useState({});
+  const [nemwebPrices,   setNemwebPrices]   = useState({});
+  const [nemwebDemand,   setNemwebDemand]   = useState({});
+  const [nemwebForecast, setNemwebForecast] = useState({});
 
   // Sync DWGM prices from App.jsx fetch (CSV) into internal state
   useEffect(() => {
@@ -319,13 +333,13 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
 
   // ── Rebuild records whenever source data changes ──────────────────────────────
   useEffect(() => {
-    const recs = buildDailyRecords(sttmData, dwgmPrices, dwgmDemand, nemwebPrices, nemwebDemand, nemwebForecast);
+    const recs = buildDailyRecords(sttmData, sttmRecent, dwgmPrices, dwgmDemand, nemwebPrices, nemwebDemand, nemwebForecast);
     setPriceRecords(recs);
     if (!spreadYear && recs.length) {
       const yrs = [...new Set(recs.map(r => r.year))].sort();
       setSpreadYear(yrs[yrs.length - 1]);
     }
-  }, [sttmData, dwgmPrices, dwgmDemand, nemwebPrices, nemwebDemand, nemwebForecast]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sttmData, sttmRecent, dwgmPrices, dwgmDemand, nemwebPrices, nemwebDemand, nemwebForecast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Fetch helpers ─────────────────────────────────────────────────────────────
   const fetchAndParse = useCallback(async (url, type) => {
@@ -367,6 +381,29 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
       setError(prev => ({ ...prev, nemweb: e.message }));
     } finally {
       setLoading(prev => ({ ...prev, nemweb: false }));
+    }
+  }, []);
+
+  const fetchSttmRecent = useCallback(async () => {
+    setLoading(prev => ({ ...prev, sttmRecent: true }));
+    setError(prev => ({ ...prev, sttmRecent: null }));
+    try {
+      const res = await fetch(`${STTM_RECENT_URL}?_=${Date.now()}`, { cache: 'no-store' });
+      if (res.status === 404) {
+        // File doesn't exist yet (first run before any weekly update) — not an error
+        setLoaded(prev => ({ ...prev, sttmRecent: true }));
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      setSttmRecent(json);
+      setLoaded(prev => ({ ...prev, sttmRecent: true }));
+    } catch (e) {
+      // Non-fatal — dashboard still works, just missing within-month STTM data
+      setError(prev => ({ ...prev, sttmRecent: e.message }));
+      setLoaded(prev => ({ ...prev, sttmRecent: true })); // mark loaded so badge shows warning not spinner
+    } finally {
+      setLoading(prev => ({ ...prev, sttmRecent: false }));
     }
   }, []);
 
@@ -423,7 +460,8 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
     fetchAndParse(STTM_URL, 'sttm');
     fetchAndParse(DWGM_URL, 'dwgm');
     fetchNemwebCsv();
-  }, [fetchAndParse, fetchNemwebCsv]);
+    fetchSttmRecent();
+  }, [fetchAndParse, fetchNemwebCsv, fetchSttmRecent]);
 
   // ── Auto-fetch on mount ──────────────────────────────────────────────────────
   useEffect(() => { fetchBoth(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -558,12 +596,14 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
 
         <div style={{ display: 'flex', gap: 8 }}>
           <StatusBadge ok={loaded.sttm} label="STTM" />
+          <StatusBadge ok={loaded.sttmRecent} label="STTM recent" />
           <StatusBadge ok={loaded.dwgm} label="DWGM" />
           <StatusBadge ok={loaded.nemweb} label="NEMWEB" />
         </div>
-        {error.sttm   && <div style={{ color: '#f85149', fontSize: 12 }}>STTM: {error.sttm}</div>}
-        {error.dwgm   && <div style={{ color: '#f85149', fontSize: 12 }}>DWGM: {error.dwgm}</div>}
-        {error.nemweb && <div style={{ color: '#f85149', fontSize: 12 }}>NEMWEB: {error.nemweb}</div>}
+        {error.sttm       && <div style={{ color: '#f85149', fontSize: 12 }}>STTM: {error.sttm}</div>}
+        {error.sttmRecent && <div style={{ color: '#e6a817', fontSize: 12 }}>STTM recent: {error.sttmRecent}</div>}
+        {error.dwgm       && <div style={{ color: '#f85149', fontSize: 12 }}>DWGM: {error.dwgm}</div>}
+        {error.nemweb     && <div style={{ color: '#f85149', fontSize: 12 }}>NEMWEB: {error.nemweb}</div>}
       </div>
     );
   }
@@ -578,6 +618,7 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
       {/* ── Top bar: status + controls ──────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <StatusBadge ok={loaded.sttm} label="STTM" />
+        <StatusBadge ok={loaded.sttmRecent} label="STTM recent" />
         <StatusBadge ok={loaded.dwgm} label="DWGM" />
         <StatusBadge ok={loaded.nemweb} label="NEMWEB" />
         <div style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>
@@ -614,11 +655,12 @@ export default function TabGasPrice({ selectedYears, dwgmPrices: dwgmPricesProp 
       </div>
 
       {/* ── Inline error notices ─────────────────────────────────────────────── */}
-      {(error.sttm || error.dwgm || error.nemweb) && (
+      {(error.sttm || error.dwgm || error.nemweb || error.sttmRecent) && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {error.sttm   && <span style={{ color: '#f85149', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>STTM: {error.sttm}</span>}
-          {error.dwgm   && <span style={{ color: '#f85149', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>DWGM: {error.dwgm}</span>}
-          {error.nemweb && <span style={{ color: '#f85149', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>NEMWEB: {error.nemweb}</span>}
+          {error.sttm       && <span style={{ color: '#f85149', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>STTM: {error.sttm}</span>}
+          {error.sttmRecent && <span style={{ color: '#e6a817', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>STTM recent: {error.sttmRecent}</span>}
+          {error.dwgm       && <span style={{ color: '#f85149', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>DWGM: {error.dwgm}</span>}
+          {error.nemweb     && <span style={{ color: '#f85149', fontSize: 11, fontFamily: 'DM Mono, monospace' }}>NEMWEB: {error.nemweb}</span>}
         </div>
       )}
 
