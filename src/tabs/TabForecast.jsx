@@ -1062,7 +1062,7 @@ export default function TabForecast({ records = [], selectedYears = [2026], fore
       {/* Row 1 — three main gas demand charts */}
       <GasDemandChart
         title="Total Gas Demand — SE NEM"
-        subtitle="GPG + non-power  ·  TJ/day  ·  P10/P90 band shown for forward forecast only"
+        subtitle="GPG + non-power  ·  TJ/day"
         predKey="pred_total" actualKey="actual_total"
         poeLoKey="poe_total_lo" poeHiKey="poe_total_hi"
         color={C.blue}
