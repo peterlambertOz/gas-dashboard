@@ -18,7 +18,7 @@ Write-Host ""
 
 # Step 1: Run gas demand forecast
 Write-Host "-- Step 1: Gas demand forecast --------------" -ForegroundColor Yellow
-$forecastScript = "C:\Users\peter\Python\run_gas_forecast.py"
+$forecastScript = "C:\Users\peter\Python\gas-dashboard\scripts\run_gas_forecast.py"
 if (Test-Path $forecastScript) {
     python $forecastScript
     if ($LASTEXITCODE -eq 0) {
