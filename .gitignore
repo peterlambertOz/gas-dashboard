@@ -22,9 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-*.tar.gz 
-"*.zip" 
-"*.tar.gz" 
-"patch-*.cjs" 
+*.tar.gz
+*.zip
+patch-*.cjs
 
+# Jupyter checkpoint folders
+.ipynb_checkpoints/
+
+# Generated data files (deployed to the pod, not versioned)
 public/data/
+gas_forecast_*.csv
+gas_forecast_hourly_*.csv

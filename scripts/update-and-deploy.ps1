@@ -42,7 +42,7 @@ foreach ($f in @("gas_forecast_$today.csv", "gas_forecast_hourly_$today.csv")) {
     $src = Join-Path $forecastSrcDir $f
     if (Test-Path $src) {
         Copy-Item $src (Join-Path $publicDataDir $f) -Force
-        Write-Host "  Copied $f → public\data\" -ForegroundColor Gray
+        Write-Host "  Copied $f -> public\data\" -ForegroundColor Gray
     } else {
         Write-Host "  WARNING: $f not found in $forecastSrcDir" -ForegroundColor Yellow
     }
@@ -52,13 +52,14 @@ Write-Host ""
 # Step 2: Git commit and push
 Write-Host "-- Step 2: Git commit and push --------------" -ForegroundColor Yellow
 
-# Stage all source files (tabs, scripts, config)
-git add src/
-git add scripts/
-git add index.html vite.config.js package.json Dockerfile nginx.conf docker-compose.yml
+# Stage everything not covered by .gitignore (code, config, run_update.bat,
+# future files) so the snapshot tracks the whole code environment.
+git add -A
 
-$status = git status --porcelain
-if ($status) {
+# Commit only if something is actually staged. --cached --quiet exits non-zero
+# when there ARE staged changes, so we commit in that case and stay silent otherwise.
+git diff --cached --quiet
+if ($LASTEXITCODE -ne 0) {
     $msg = "Deploy $(Get-Date -Format 'yyyy-MM-dd HH:mm') - dashboard update"
     git commit -m $msg
     if ($LASTEXITCODE -eq 0) {
@@ -69,7 +70,7 @@ if ($status) {
         Write-Host "  WARNING: git commit failed" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "  No source changes to commit" -ForegroundColor Gray
+    Write-Host "  No code changes to commit" -ForegroundColor Gray
 }
 Write-Host ""
 
