@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { fetchAEMOData, fetchDwgmData, loadFromExcel, aggregateRows, generateSampleData, computeStats } from './utils/aemoParser';
 import { exportToExcel, exportToPowerPoint } from './utils/exportUtils';
+import { idbGet, idbSet } from './utils/idbCache';
 import TabDailyDemand from './tabs/TabDailyDemand';
 import TabGPG from './tabs/TabGPG';
 import TabSupplyCapacity from './tabs/TabSupplyCapacity';
@@ -96,13 +97,13 @@ export default function App() {
         data = await fetchAEMOData(setLoadMsg);
         const fetchedAt = new Date();
         applyData(data, setRecords, setStats, setLastFetch, setSelectedYears, setDateRange, setUsingDemo, fetchedAt);
-        // Persist to localStorage for next session
+        // Persist to IndexedDB for next session
         try {
           setLoadMsg('Saving to local cache...');
-          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-          localStorage.setItem(CACHE_META_KEY, JSON.stringify({ fetchedAt: fetchedAt.toISOString(), count: data.length }));
+          await idbSet(CACHE_KEY, data);
+          await idbSet(CACHE_META_KEY, { fetchedAt: fetchedAt.toISOString(), count: data.length });
         } catch (cacheErr) {
-          console.warn('Cache save failed (storage full?):', cacheErr);
+          console.warn('Cache save failed:', cacheErr);
         }
         // Fetch DWGM prices in background — don't block GBB load if it fails
         fetchDwgmData(setLoadMsg).then(prices => {
@@ -122,23 +123,51 @@ export default function App() {
 
   // On mount: load from cache if available, otherwise show empty state
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CACHE_KEY);
-      const meta = localStorage.getItem(CACHE_META_KEY);
-      if (raw) {
-        setLoadMsg('Loading cached data...');
-        setLoading(true);
-        const data = JSON.parse(raw);
-        const { fetchedAt } = meta ? JSON.parse(meta) : {};
-        applyData(data, setRecords, setStats, setLastFetch, setSelectedYears, setDateRange, setUsingDemo, fetchedAt);
-        setLoading(false);
-        setLoadMsg('');
+    let cancelled = false;
+    (async () => {
+      try {
+        let data = await idbGet(CACHE_KEY);
+        let meta = await idbGet(CACHE_META_KEY);
+
+        // One-time migration from the old localStorage cache. If IndexedDB is
+        // empty but a legacy cache exists, adopt it and copy it across so the
+        // upgrade doesn't blank the user's loaded session.
+        if (!data) {
+          const legacyRaw = localStorage.getItem(CACHE_KEY);
+          if (legacyRaw) {
+            data = JSON.parse(legacyRaw);
+            const legacyMeta = localStorage.getItem(CACHE_META_KEY);
+            meta = legacyMeta ? JSON.parse(legacyMeta) : null;
+            try {
+              await idbSet(CACHE_KEY, data);
+              if (meta) await idbSet(CACHE_META_KEY, meta);
+            } catch (migErr) {
+              console.warn('Cache migration failed:', migErr);
+            }
+          }
+        }
+        // Clear the legacy keys either way so they stop consuming the 5 MB
+        // localStorage ceiling that caused the original overflow.
+        localStorage.removeItem(CACHE_KEY);
+        localStorage.removeItem(CACHE_META_KEY);
+
+        if (data && !cancelled) {
+          setLoadMsg('Loading cached data...');
+          setLoading(true);
+          const { fetchedAt } = meta || {};
+          applyData(data, setRecords, setStats, setLastFetch, setSelectedYears, setDateRange, setUsingDemo, fetchedAt);
+          setLoading(false);
+          setLoadMsg('');
+        }
+      } catch (e) {
+        console.warn('Cache load failed:', e);
+        if (!cancelled) {
+          setLoading(false);
+          setLoadMsg('');
+        }
       }
-    } catch (e) {
-      console.warn('Cache load failed:', e);
-      setLoading(false);
-      setLoadMsg('');
-    }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
 
@@ -175,8 +204,8 @@ export default function App() {
         const fetchedAt = new Date();
         applyData(data, setRecords, setStats, setLastFetch, setSelectedYears, setDateRange, setUsingDemo, fetchedAt);
         try {
-          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-          localStorage.setItem(CACHE_META_KEY, JSON.stringify({ fetchedAt: fetchedAt.toISOString(), count: data.length }));
+          await idbSet(CACHE_KEY, data);
+          await idbSet(CACHE_META_KEY, { fetchedAt: fetchedAt.toISOString(), count: data.length });
         } catch (cacheErr) {
           console.warn('Cache save failed:', cacheErr);
         }
@@ -204,8 +233,8 @@ export default function App() {
           const fetchedAt = new Date();
           applyData(data, setRecords, setStats, setLastFetch, setSelectedYears, setDateRange, setUsingDemo, fetchedAt);
           try {
-            localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-            localStorage.setItem(CACHE_META_KEY, JSON.stringify({ fetchedAt: fetchedAt.toISOString(), count: data.length }));
+            await idbSet(CACHE_KEY, data);
+            await idbSet(CACHE_META_KEY, { fetchedAt: fetchedAt.toISOString(), count: data.length });
           } catch (cacheErr) {
             console.warn('Cache save failed:', cacheErr);
           }
@@ -329,8 +358,8 @@ export default function App() {
       applyData(data, setRecords, setStats, setLastFetch, setSelectedYears, setDateRange, setUsingDemo, fetchedAt);
       try {
         setLoadMsg('Saving to local cache...');
-        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-        localStorage.setItem(CACHE_META_KEY, JSON.stringify({ fetchedAt: fetchedAt.toISOString(), count: data.length }));
+        await idbSet(CACHE_KEY, data);
+        await idbSet(CACHE_META_KEY, { fetchedAt: fetchedAt.toISOString(), count: data.length });
       } catch (cacheErr) {
         console.warn('Cache save failed:', cacheErr);
       }
