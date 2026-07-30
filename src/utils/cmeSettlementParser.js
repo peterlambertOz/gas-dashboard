@@ -49,6 +49,26 @@ export function parseContractMonth(token) {
 }
 
 /**
+ * Guess the Settle column index when there's no header row, by recognising
+ * CME's standard futures-table layout: Month, Open, High, Low, Last, Change,
+ * Settle, Est. Volume, Prior day OI. Open/High/Low/Last are usually "-" for
+ * forward months with no trades, and Change is a signed value immediately
+ * before Settle — so "first numeric column" alone would wrongly grab Change.
+ * Returns -1 if the layout doesn't match (caller falls back to first-numeric).
+ */
+function guessSettleColNoHeader(row) {
+  if (row.length < 7) return -1;
+  const isDashOrBlank = c => c === '-' || c === '';
+  const isSignedNumber = c => /^[+-]/.test(c) && !isNaN(parseFloat(c));
+  const isPlainNumber = c => !isNaN(parseFloat(c)) && parseFloat(c) >= 0 && !/^[+-]/.test(c);
+  // Columns 1-4 (Open/High/Low/Last) blank, column 5 a signed Change, column 6 the Settle value
+  if ([1, 2, 3, 4].every(i => isDashOrBlank(row[i])) && isSignedNumber(row[5]) && isPlainNumber(row[6])) {
+    return 6;
+  }
+  return -1;
+}
+
+/**
  * Parse pasted CME settlement-table text into [{month:'YYYY-MM', settle:number}],
  * sorted ascending. Throws with a helpful message if no usable rows are found.
  */
@@ -69,6 +89,16 @@ export function parseCmePasteText(text) {
     settleCol = cells.findIndex(c => /^settle$/i.test(c));
     if (settleCol === -1) settleCol = cells.findIndex(c => /settle/i.test(c));
     if (settleCol === -1) settleCol = cells.findIndex(c => /^(last|close)$/i.test(c));
+  } else {
+    // No header — try to recognise the standard CME layout from the first
+    // plausible data row (month token in column 0).
+    for (const line of lines) {
+      const row = splitCells(line);
+      if (row.length >= 2 && parseContractMonth(row[0])) {
+        settleCol = guessSettleColNoHeader(row);
+        break;
+      }
+    }
   }
 
   const dataStart = headerIdx >= 0 ? headerIdx + 1 : 0;

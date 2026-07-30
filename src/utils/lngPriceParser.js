@@ -258,15 +258,45 @@ function parseBrentForward(workbook, warnings) {
       quoteDate,
       month,
       brentYear1: futuresCol >= 0 ? row[futuresCol] : null,
+      futuresByYear: futuresCol >= 0 ? [0, 1, 2, 3, 4].map(k => row[futuresCol + k]) : [],
       slopePercent: slopeCol >= 0 ? row[slopeCol] : null,
       freightYear1: freightStartCol >= 0 ? row[freightStartCol] : null,
       freightByYear: freightStartCol >= 0 ? [0, 1, 2, 3, 4].map(k => row[freightStartCol + k]) : [],
       audUsd: audCol >= 0 ? row[audCol] : null,
       efficiency: effCol >= 0 ? row[effCol] : null,
       netbackYear1: netbackCol >= 0 ? row[netbackCol] : null,
+      netbackByYear: netbackCol >= 0 ? [0, 1, 2, 3, 4].map(k => row[netbackCol + k]) : [],
     });
   }
   return { futures, netback, rawRows };
+}
+
+/** Add `n` calendar months to a 'YYYY-MM' string. */
+function addMonthsYm(yearMonth, n) {
+  const [y, m] = yearMonth.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Build the Brent Year1-5 forward term structure from the ACCC file's most
+ * recent quote, as a monthly-indexed forward curve (one point per year,
+ * placed at the start month of that year's forward window) — the same
+ * "latest published forward curve" concept already used for JKM, just at
+ * annual rather than monthly granularity since that's ACCC's own cadence
+ * for the medium-term series.
+ */
+export function buildBrentForwardCurve(brentRawRows) {
+  if (!brentRawRows?.length) return { futures: [], netback: [], quoteMonth: null };
+  const latest = brentRawRows[brentRawRows.length - 1];
+  const futures = [];
+  const netback = [];
+  for (let n = 0; n < 5; n++) {
+    const month = addMonthsYm(latest.month, n * 12);
+    if (typeof latest.futuresByYear[n] === 'number') futures.push({ month, value: latest.futuresByYear[n] });
+    if (typeof latest.netbackByYear[n] === 'number') netback.push({ month, value: latest.netbackByYear[n] });
+  }
+  return { futures, netback, quoteMonth: latest.month };
 }
 
 /**
@@ -284,6 +314,7 @@ export function parseLngWorkbook(arrayBuffer) {
   const jkmNetback = buildHistoricalAndForward(curves, 'netback');
 
   const brent = parseBrentForward(workbook, warnings);
+  const brentForwardCurve = buildBrentForwardCurve(brent.rawRows);
 
   return {
     audUsd,
@@ -291,9 +322,10 @@ export function parseLngWorkbook(arrayBuffer) {
     jkmSettlement,          // { historical: [{month,value}], forward: [{month,value}], latestQuoteDate }
     jkmNetback,             // same shape, A$/GJ
     jkmRawCurves: curves,   // [{quoteDate, contractMonth, settlement, freight, audUsd, efficiency, netback}]
-    brentFutures: brent.futures,  // [{month, value}] US$/bbl
-    brentNetback: brent.netback,  // [{month, value}] A$/GJ
-    brentRawRows: brent.rawRows,  // [{quoteDate, month, brentYear1, slopePercent, freightYear1, audUsd, efficiency, netbackYear1}]
+    brentFutures: brent.futures,  // [{month, value}] US$/bbl — rolling Year-1 published each month
+    brentNetback: brent.netback,  // [{month, value}] A$/GJ — rolling Year-1 published each month
+    brentRawRows: brent.rawRows,  // [{quoteDate, month, brentYear1, futuresByYear, slopePercent, freightYear1, freightByYear, audUsd, efficiency, netbackYear1, netbackByYear}]
+    brentForwardCurve,      // { futures: [{month,value}], netback: [{month,value}], quoteMonth } — latest quote's Year1-5 term structure, ACCC's data out to ~2028
     parsedAt: new Date().toISOString(),
     warnings,
   };
@@ -320,10 +352,10 @@ export function buildChartDatasets(parsed) {
     ['forward', parsed.jkmSettlement.forward],
   ]);
 
-  const brentChart = parsed.brentFutures
-    .slice()
-    .sort((a, b) => a.month.localeCompare(b.month))
-    .map(r => ({ month: r.month, value: r.value }));
+  const brentChart = mergeByMonth([
+    ['value', parsed.brentFutures],
+    ['forward', parsed.brentForwardCurve?.futures || []],
+  ]);
 
   const audChart = parsed.audUsd.map(r => ({ date: r.date, rate: r.rate, avg5day: r.avg5day }));
 
@@ -331,6 +363,7 @@ export function buildChartDatasets(parsed) {
     ['jkmHistorical', parsed.jkmNetback.historical],
     ['jkmForward', parsed.jkmNetback.forward],
     ['brentYear1', parsed.brentNetback],
+    ['brentForward', parsed.brentForwardCurve?.netback || []],
   ]);
 
   const latest = {
@@ -389,13 +422,6 @@ export function recomputeJkmForward(parsed, externalRows) {
   return { forward, netbackForward, meta: { asOf: latestKey, audUsd, efficiency, fallbackFreight } };
 }
 
-/** Add `n` calendar months to a 'YYYY-MM' string. */
-function addMonthsYm(yearMonth, n) {
-  const [y, m] = yearMonth.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + n, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
 /**
  * Recompute an annualised Brent-linked netback term structure (Year 1, 2, 3, ...)
  * from an external (e.g. CME) monthly Brent futures curve, replicating the
@@ -443,6 +469,59 @@ export function recomputeBrentTermStructure(parsed, externalRows, opts = {}) {
   }
 
   return { years, meta: { quoteMonth, slopePercent, audUsd, efficiency } };
+}
+
+/** Number of calendar months between two 'YYYY-MM' strings (to >= 0). */
+function monthsBetween(fromYm, toYm) {
+  const [fy, fm] = fromYm.split('-').map(Number);
+  const [ty, tm] = toYm.split('-').map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+}
+
+/**
+ * Recompute the Brent-linked netback curve at MONTHLY resolution from an
+ * external (e.g. CME) monthly Brent futures curve — unlike
+ * recomputeBrentTermStructure (which annualises into Year 1-N buckets to
+ * match ACCC's own annual cadence), this keeps every individual month CME
+ * publishes, giving a much more granular forward curve for the charts.
+ *
+ * Each month is still assigned the freight/opex/transport assumptions for
+ * whichever "Year N" (12-month window from the current front month) it
+ * falls into, since those assumptions are only published annually — so the
+ * netback curve will show small step-changes at each 12-month boundary
+ * rather than a smooth monthly progression in those inputs.
+ *
+ * @param {object} parsed
+ * @param {{month:string, settle:number}[]} externalRows  Monthly Brent futures
+ * @param {{slopePercent?: number}} opts
+ */
+export function recomputeBrentMonthlyForward(parsed, externalRows, opts = {}) {
+  if (!externalRows?.length) throw new Error('No Brent futures rows to recompute from.');
+  const sorted = externalRows.slice().sort((a, b) => a.month.localeCompare(b.month));
+  const quoteMonth = sorted[0].month; // earliest pasted contract month = the current front month
+
+  const lastRawRow = parsed.brentRawRows.at(-1);
+  const slopePercent = opts.slopePercent ?? lastRawRow?.slopePercent;
+  const audUsd = parsed.audUsd.at(-1)?.avg5day ?? parsed.audUsd.at(-1)?.rate ?? lastRawRow?.audUsd;
+  const efficiency = lastRawRow?.efficiency;
+  const freightByYear = lastRawRow?.freightByYear?.length ? lastRawRow.freightByYear : [null, null, null, null, null];
+
+  const forward = [];
+  const netbackForward = [];
+  for (const { month, settle } of sorted) {
+    const yearIdx = Math.floor(monthsBetween(quoteMonth, month) / 12); // 0 = Year 1
+    const usingExtrapolatedFreight = yearIdx > 4;
+    const freight = usingExtrapolatedFreight ? freightByYear[4] : freightByYear[yearIdx];
+    const calendarYear = Number(month.slice(0, 4));
+    const opex = lookupByYear(parsed.costAssumptions.opexByYear, calendarYear);
+    const transport = lookupByYear(parsed.costAssumptions.transportByYear, calendarYear);
+    const lngPriceUsdMmbtu = brentToLngPrice(settle, slopePercent);
+    const netbackAudGj = calcNetbackAudGj({ lngPriceUsdMmbtu, freightUsdMmbtu: freight, audUsdRate: audUsd, opexAudGj: opex, efficiency, transportAudGj: transport });
+    forward.push({ month, value: settle, extrapolatedFreight: usingExtrapolatedFreight });
+    netbackForward.push({ month, value: netbackAudGj, extrapolatedFreight: usingExtrapolatedFreight });
+  }
+
+  return { forward, netbackForward, meta: { quoteMonth, slopePercent, audUsd, efficiency } };
 }
 
 /**

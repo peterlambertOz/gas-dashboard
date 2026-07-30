@@ -8,17 +8,19 @@ import {
 } from '../components/ChartCard';
 import { exportToPowerPoint, exportToExcel } from '../utils/exportUtils';
 import { idbGet, idbSet } from '../utils/idbCache';
-import { parseLngWorkbookFile, buildChartDatasets, recomputeJkmForward, recomputeBrentTermStructure, backfillBrentNetbackFromSpot } from '../utils/lngPriceParser';
+import { parseLngWorkbookFile, buildChartDatasets, recomputeJkmForward, recomputeBrentTermStructure, recomputeBrentMonthlyForward, backfillBrentNetbackFromSpot } from '../utils/lngPriceParser';
 import { parseCmePasteText } from '../utils/cmeSettlementParser';
 import { parseOfxAudUsdFile, parseOfxAudUsdWorkbook, mergeAudUsdSeries } from '../utils/audUsdOfxParser';
 import { fetchLatestGshBenchmark } from '../utils/gshBenchmarkParser';
 import { parseBrentSpotFile, fetchBrentSpotFile } from '../utils/brentSpotParser';
 
 const ACCC_LNG_PAGE = 'https://www.accc.gov.au/inquiries-and-consultations/gas-inquiry-2017-30/lng-netback-price-series';
-const CACHE_KEY = 'lng_netback_price_series_v1';
+const CACHE_KEY = 'lng_netback_price_series_v2';
 const OFX_CACHE_KEY = 'lng_audusd_ofx_override_v1';
 const GSH_CACHE_KEY = 'lng_gsh_wallumbilla_benchmark_v1';
 const BRENT_SPOT_CACHE_KEY = 'lng_brent_spot_backfill_v1';
+const CME_JKM_CACHE_KEY = 'lng_cme_jkm_update_v1';
+const CME_BRENT_CACHE_KEY = 'lng_cme_brent_update_v1';
 
 const COLORS = {
   jkm: '#79c0ff',
@@ -28,7 +30,6 @@ const COLORS = {
   audAvg: '#8b949e',
   jkmNetback: '#79c0ff',
   brentNetback: '#ffa657',
-  cme: '#e6a817',
   ofx: '#3fb950',
   gsh: '#d16bf5',
   brentSpot: '#f0883e',
@@ -72,9 +73,24 @@ function dayTick(dstr) {
 function fmtNum(n, dp = 2) {
   return typeof n === 'number' ? n.toFixed(dp) : '–';
 }
+function fmtUploadedAt(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return `${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+}
 
 function monthTickInterval(len) {
   return Math.max(1, Math.floor(len / 14));
+}
+
+const CHART_START_MONTH = '2015-01';
+const CHART_START_DATE = '2015-01-01';
+
+/** Clip a chart array so it never shows data before the given start key (but
+ * leaves it untouched if the data already starts later than that). */
+function clipToStart(chartArray, key, startValue) {
+  if (!chartArray?.length) return chartArray;
+  return chartArray.filter(r => r[key] >= startValue);
 }
 
 export default function TabLNGPrices() {
@@ -150,7 +166,9 @@ export default function TabLNGPrices() {
   const [cmeJkmResult, setCmeJkmResult] = useState(null);
   const [cmeBrentResult, setCmeBrentResult] = useState(null);
   const [cmeError, setCmeError] = useState('');
-  const [cmePanelOpen, setCmePanelOpen] = useState(false);
+  const [cmePanelOpen, setCmePanelOpen] = useState(true);
+  const [cmeJkmUploadedAt, setCmeJkmUploadedAt] = useState(null);
+  const [cmeBrentUploadedAt, setCmeBrentUploadedAt] = useState(null);
 
   // AUD/USD merge must be declared before any callback that closes over it
   const effectiveParsed = useMemo(() => {
@@ -164,7 +182,11 @@ export default function TabLNGPrices() {
     try {
       const { rows, skippedCount } = parseCmePasteText(cmeJkmText);
       const result = recomputeJkmForward(effectiveParsed, rows);
-      setCmeJkmResult({ ...result, rowCount: rows.length, skippedCount });
+      const finalResult = { ...result, rowCount: rows.length, skippedCount };
+      const uploadedAt = new Date().toISOString();
+      setCmeJkmResult(finalResult);
+      setCmeJkmUploadedAt(uploadedAt);
+      idbSet(CME_JKM_CACHE_KEY, { text: cmeJkmText, result: finalResult, uploadedAt }).catch(e => console.warn('CME JKM cache write failed:', e));
     } catch (e) {
       setCmeError(`JKM paste: ${e.message}`);
     }
@@ -176,7 +198,12 @@ export default function TabLNGPrices() {
       const { rows, skippedCount } = parseCmePasteText(cmeBrentText);
       const slopeOverride = cmeSlope.trim() ? Number(cmeSlope) : undefined;
       const result = recomputeBrentTermStructure(effectiveParsed, rows, { slopePercent: slopeOverride });
-      setCmeBrentResult({ ...result, rowCount: rows.length, skippedCount });
+      const monthly = recomputeBrentMonthlyForward(effectiveParsed, rows, { slopePercent: slopeOverride });
+      const finalResult = { ...result, ...monthly, rowCount: rows.length, skippedCount };
+      const uploadedAt = new Date().toISOString();
+      setCmeBrentResult(finalResult);
+      setCmeBrentUploadedAt(uploadedAt);
+      idbSet(CME_BRENT_CACHE_KEY, { text: cmeBrentText, slope: cmeSlope, result: finalResult, uploadedAt }).catch(e => console.warn('CME Brent cache write failed:', e));
     } catch (e) {
       setCmeError(`Brent paste: ${e.message}`);
     }
@@ -224,6 +251,27 @@ export default function TabLNGPrices() {
         if (cachedBrentSpot && !cancelled) setBrentSpot(cachedBrentSpot);
       } catch (e) {
         console.warn('Brent spot cache read failed:', e);
+      }
+      try {
+        const cachedCmeJkm = await idbGet(CME_JKM_CACHE_KEY);
+        if (cachedCmeJkm && !cancelled) {
+          setCmeJkmText(cachedCmeJkm.text || '');
+          setCmeJkmResult(cachedCmeJkm.result || null);
+          setCmeJkmUploadedAt(cachedCmeJkm.uploadedAt || null);
+        }
+      } catch (e) {
+        console.warn('CME JKM cache read failed:', e);
+      }
+      try {
+        const cachedCmeBrent = await idbGet(CME_BRENT_CACHE_KEY);
+        if (cachedCmeBrent && !cancelled) {
+          setCmeBrentText(cachedCmeBrent.text || '');
+          setCmeSlope(cachedCmeBrent.slope || '');
+          setCmeBrentResult(cachedCmeBrent.result || null);
+          setCmeBrentUploadedAt(cachedCmeBrent.uploadedAt || null);
+        }
+      } catch (e) {
+        console.warn('CME Brent cache read failed:', e);
       }
     })();
     return () => { cancelled = true; };
@@ -344,8 +392,18 @@ export default function TabLNGPrices() {
   const mergedBrentChart = useMemo(() => {
     if (!datasets) return null;
     const spotRows = brentBackfill?.rows.map(r => ({ month: r.month, value: r.avgBrentUsdBbl }));
-    return mergeExtraByMonth(datasets.brentChart, spotRows, 'spotBackfill');
-  }, [datasets, brentBackfill]);
+    let chart = mergeExtraByMonth(datasets.brentChart, spotRows, 'spotBackfill');
+    if (brentBackfill) {
+      const cutoffRow = chart.find(r => r.month === brentBackfill.meta.cutoffMonth);
+      if (cutoffRow?.value != null) cutoffRow.spotBackfill = cutoffRow.value;
+    }
+    chart = mergeExtraByMonth(chart, cmeBrentResult?.forward, 'cme');
+    if (cmeBrentResult?.forward?.length) {
+      const lastValueRow = [...chart].reverse().find(r => r.value != null);
+      if (lastValueRow) lastValueRow.cme = lastValueRow.value;
+    }
+    return chart;
+  }, [datasets, brentBackfill, cmeBrentResult]);
 
   const mergedNetbackChart = useMemo(() => {
     if (!datasets) return null;
@@ -353,8 +411,19 @@ export default function TabLNGPrices() {
     chart = mergeExtraByMonth(chart, gshBenchmark?.monthly, 'wallumbillaSpot');
     const backfillRows = brentBackfill?.rows.map(r => ({ month: r.month, value: r.netbackAudGj }));
     chart = mergeExtraByMonth(chart, backfillRows, 'brentSpotBackfill');
+    // Bridge the gap between the dashed backfill and the solid ACCC series:
+    // give them a shared point at the cutoff month so the lines visually join.
+    if (brentBackfill) {
+      const cutoffRow = chart.find(r => r.month === brentBackfill.meta.cutoffMonth);
+      if (cutoffRow?.brentYear1 != null) cutoffRow.brentSpotBackfill = cutoffRow.brentYear1;
+    }
+    chart = mergeExtraByMonth(chart, cmeBrentResult?.netbackForward, 'brentCme');
+    if (cmeBrentResult?.netbackForward?.length) {
+      const lastValueRow = [...chart].reverse().find(r => r.brentYear1 != null);
+      if (lastValueRow) lastValueRow.brentCme = lastValueRow.brentYear1;
+    }
     return chart;
-  }, [datasets, cmeJkmResult, gshBenchmark, brentBackfill]);
+  }, [datasets, cmeJkmResult, gshBenchmark, brentBackfill, cmeBrentResult]);
 
   const handleExportPPT = (id, title) => exportToPowerPoint?.(id, title);
   const handleExportXLSX = (rows, name) => exportToExcel?.(rows, name);
@@ -391,10 +460,11 @@ export default function TabLNGPrices() {
     );
   }
 
-  const { audChart, latest } = datasets;
-  const jkmChart = mergedJkmChart;
-  const brentChart = mergedBrentChart;
-  const netbackChart = mergedNetbackChart;
+  const { audChart: rawAudChart, latest } = datasets;
+  const jkmChart = clipToStart(mergedJkmChart, 'month', CHART_START_MONTH);
+  const brentChart = clipToStart(mergedBrentChart, 'month', CHART_START_MONTH);
+  const netbackChart = clipToStart(mergedNetbackChart, 'month', CHART_START_MONTH);
+  const audChart = clipToStart(rawAudChart, 'date', CHART_START_DATE);
   const jkmForwardStartMonth = parsed.jkmSettlement.forward[0]?.month;
   const netbackForwardStartMonth = parsed.jkmNetback.forward[0]?.month;
   const audTickInterval = Math.max(1, Math.floor(audChart.length / 16));
@@ -505,6 +575,7 @@ export default function TabLNGPrices() {
           ['AUD/USD', latest.audUsd, '', COLORS.aud],
           ['JKM netback @ Wallumbilla', latest.jkmNetback, 'A$/GJ', COLORS.jkmNetback],
           ['Brent Y1 netback @ Wallumbilla', latest.brentNetback, 'A$/GJ', COLORS.brentNetback],
+          ['Wallumbilla GSH spot (actual)', gshBenchmark?.daily?.at(-1)?.price ?? null, 'A$/GJ', COLORS.gsh],
         ].map(([label, value, unit, color]) => (
           <div key={label} style={{
             background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px',
@@ -517,6 +588,52 @@ export default function TabLNGPrices() {
           </div>
         ))}
       </div>
+
+      {/* Chart: Netback price at Wallumbilla (headline chart, shown first) */}
+      <ChartCard
+        id="chart-lng-wallumbilla-netback"
+        title="Netback Price at Wallumbilla"
+        subtitle="A$/GJ — short-term JKM-based netback, medium-term Year 1-5 Brent-based netback (incl. ACCC's forward curve), and the actual Wallumbilla GSH spot price"
+        onExportPPT={() => handleExportPPT('chart-lng-wallumbilla-netback', 'Netback Price at Wallumbilla')}
+        onExportXLSX={() => handleExportXLSX(netbackChart, 'wallumbilla_netback_prices')}
+      >
+        <ResponsiveContainer width="100%" height={340}>
+          <ComposedChart data={netbackChart} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
+            <CartesianGrid {...GRID_STYLE} />
+            <XAxis dataKey="month" tickFormatter={monthLabel} interval={monthTickInterval(netbackChart.length)} {...AXIS_STYLE} />
+            <YAxis {...AXIS_STYLE} tickFormatter={v => v.toFixed(0)} />
+            <Tooltip content={<CustomTooltip formatter={(v, name) => `${Number(v).toFixed(2)} A$/GJ`} labelFormatter={monthLabelLong} />} />
+            {netbackForwardStartMonth && <ReferenceLine x={netbackForwardStartMonth} stroke="var(--border)" strokeDasharray="3 3" />}
+            {brentBackfill && <ReferenceLine x={brentBackfill.meta.cutoffMonth} stroke={COLORS.brentSpot} strokeDasharray="2 2" strokeOpacity={0.5} />}
+            <Line type="monotone" dataKey="jkmHistorical" name="JKM netback (historical)" stroke={COLORS.jkmNetback} strokeWidth={2} dot={false} connectNulls />
+            <Line type="monotone" dataKey="jkmForward" name="JKM netback (forward curve)" stroke={COLORS.jkmNetback} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+            <Line type="monotone" dataKey="brentYear1" name="Brent Year-1 netback" stroke={COLORS.brentNetback} strokeWidth={2} dot={false} connectNulls />
+            <Line type="monotone" dataKey="brentForward" name="Brent Year 1-5 forward netback (ACCC)" stroke={COLORS.brentNetback} strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3 }} connectNulls />
+            {brentBackfill && <Line type="monotone" dataKey="brentSpotBackfill" name="Brent netback (spot-based estimate, pre-2022)" stroke={COLORS.brentSpot} strokeWidth={1.5} strokeDasharray="4 2" dot={false} connectNulls />}
+            {cmeJkmResult && <Line type="monotone" dataKey="jkmCme" name="JKM netback (CME-updated)" stroke={COLORS.jkmNetback} strokeWidth={2} dot={{ r: 3 }} connectNulls />}
+            {cmeBrentResult && <Line type="monotone" dataKey="brentCme" name="Brent netback (CME-updated, monthly)" stroke={COLORS.brentNetback} strokeWidth={2} dot={{ r: 3 }} connectNulls />}
+            {gshBenchmark && <Line type="monotone" dataKey="wallumbillaSpot" name="Wallumbilla GSH spot (actual)" stroke={COLORS.gsh} strokeWidth={2} dot={false} connectNulls />}
+          </ComposedChart>
+        </ResponsiveContainer>
+        <Legend items={[
+          { color: COLORS.jkmNetback, label: 'Short-term JKM netback — historical (solid) / ACCC forward curve (dashed)' },
+          { color: COLORS.brentNetback, label: 'Medium-term Brent Year-1 netback (solid) / ACCC\'s Year 1-5 forward curve (dashed), out to ~5 years ahead' },
+          ...(brentBackfill ? [{ color: COLORS.brentSpot, label: `Brent netback estimate before ${monthLabelLong(brentBackfill.meta.cutoffMonth)} — spot price × ${brentBackfill.meta.slopePercent}% slope (earliest available), approximate`, opacity: 0.8 }] : []),
+          ...(cmeJkmResult ? [{ color: COLORS.jkmNetback, label: 'JKM netback recomputed from CME-updated settlement prices (dotted markers)' }] : []),
+          ...(cmeBrentResult ? [{ color: COLORS.brentNetback, label: `Brent netback recomputed from CME-updated futures — monthly resolution (${cmeBrentResult.rowCount} months pasted), dotted markers` }] : []),
+          ...(gshBenchmark ? [{ color: COLORS.gsh, label: `Wallumbilla GSH benchmark spot price, actual (monthly avg, since ${gshBenchmark.monthly[0]?.month})` }] : []),
+        ]} />
+        {gshError && !gshBenchmark && (
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+            Wallumbilla spot price unavailable: {gshError}
+          </div>
+        )}
+        {brentSpotError && !brentSpot && (
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+            Brent netback backfill unavailable: {brentSpotError}
+          </div>
+        )}
+      </ChartCard>
 
       {/* CME daily update panel */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 16px' }}>
@@ -565,6 +682,7 @@ export default function TabLNGPrices() {
                 {cmeJkmResult && (
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
                     Parsed {cmeJkmResult.rowCount} month(s){cmeJkmResult.skippedCount ? `, skipped ${cmeJkmResult.skippedCount} unrecognised line(s)` : ''}.
+                    {cmeJkmUploadedAt && <> Last uploaded {fmtUploadedAt(cmeJkmUploadedAt)}.</>}
                   </div>
                 )}
               </div>
@@ -593,6 +711,7 @@ export default function TabLNGPrices() {
                 {cmeBrentResult && (
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
                     Parsed {cmeBrentResult.rowCount} month(s) → {cmeBrentResult.years.length} year(s) of annualised term structure.
+                    {cmeBrentUploadedAt && <> Last uploaded {fmtUploadedAt(cmeBrentUploadedAt)}.</>}
                   </div>
                 )}
               </div>
@@ -619,13 +738,13 @@ export default function TabLNGPrices() {
             {jkmForwardStartMonth && <ReferenceLine x={jkmForwardStartMonth} stroke="var(--border)" strokeDasharray="3 3" />}
             <Line type="monotone" dataKey="historical" name="Historical (front-month settlement)" stroke={COLORS.jkm} strokeWidth={2} dot={false} connectNulls />
             <Line type="monotone" dataKey="forward" name="Latest forward curve (ACCC)" stroke={COLORS.jkmForward} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-            {cmeJkmResult && <Line type="monotone" dataKey="cme" name="CME-updated forward curve" stroke={COLORS.cme} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
+            {cmeJkmResult && <Line type="monotone" dataKey="cme" name="CME-updated forward curve" stroke={COLORS.jkm} strokeWidth={2} dot={{ r: 3 }} connectNulls />}
           </ComposedChart>
         </ResponsiveContainer>
         <Legend items={[
           { color: COLORS.jkm, label: 'Historical — nearest contract month settlement at each publication date' },
           { color: COLORS.jkmForward, label: 'Forward — full futures curve as of the ACCC\'s latest publication', opacity: 0.7 },
-          ...(cmeJkmResult ? [{ color: COLORS.cme, label: `CME-updated forward curve (${cmeJkmResult.rowCount} months pasted)` }] : []),
+          ...(cmeJkmResult ? [{ color: COLORS.jkm, label: `CME-updated forward curve (${cmeJkmResult.rowCount} months pasted), dotted markers` }] : []),
         ]} />
       </ChartCard>
 
@@ -633,7 +752,7 @@ export default function TabLNGPrices() {
       <ChartCard
         id="chart-lng-brent-futures"
         title="Brent Crude — Year 1 Futures"
-        subtitle="Annualised 12-month-forward Brent futures strip used in the medium-term LNG netback calculation, US$/bbl (with EIA spot price history before the ACCC series starts)"
+        subtitle="Annualised 12-month-forward Brent futures strip used in the medium-term LNG netback calculation, US$/bbl (with EIA spot price history before the ACCC series starts, and the ACCC's own Year 1-5 forward curve)"
         onExportPPT={() => handleExportPPT('chart-lng-brent-futures', 'Brent Crude Year 1 Futures')}
         onExportXLSX={() => handleExportXLSX(brentChart, 'brent_year1_futures')}
       >
@@ -645,11 +764,14 @@ export default function TabLNGPrices() {
             <Tooltip content={<CustomTooltip formatter={(v) => `${Number(v).toFixed(2)} US$/bbl`} labelFormatter={monthLabelLong} />} />
             {brentBackfill && <Line type="monotone" dataKey="spotBackfill" name="Brent spot (EIA, pre-2022 context)" stroke={COLORS.brentSpot} strokeWidth={1.5} strokeDasharray="4 2" dot={false} connectNulls />}
             <Line type="monotone" dataKey="value" name="Brent Year 1 futures" stroke={COLORS.brent} strokeWidth={2} dot={false} connectNulls />
+            <Line type="monotone" dataKey="forward" name="ACCC Year 1-5 forward curve" stroke={COLORS.brent} strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3 }} connectNulls />
+            {cmeBrentResult && <Line type="monotone" dataKey="cme" name="CME-updated forward curve (monthly)" stroke={COLORS.brent} strokeWidth={2} dot={{ r: 3 }} connectNulls />}
           </LineChart>
         </ResponsiveContainer>
         <Legend items={[
-          { color: COLORS.brent, label: 'Annualised Year-1 Brent futures terminal price, published monthly' },
+          { color: COLORS.brent, label: 'Annualised Year-1 Brent futures terminal price, published monthly (solid) / ACCC\'s latest Year 1-5 forward curve (dashed)' },
           ...(brentBackfill ? [{ color: COLORS.brentSpot, label: 'Brent monthly-average spot price (EIA) — context only, before ACCC\'s Brent series starts', opacity: 0.8 }] : []),
+          ...(cmeBrentResult ? [{ color: COLORS.brent, label: `CME-updated forward curve — monthly resolution (${cmeBrentResult.rowCount} months pasted), dotted markers` }] : []),
         ]} />
       </ChartCard>
 
@@ -668,7 +790,7 @@ export default function TabLNGPrices() {
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'DM Mono, monospace' }}>Year {y.year}{y.extrapolatedFreight ? ' *' : ''}</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.brent }}>{fmtNum(y.avgBrentUsdBbl, 2)}</div>
                 <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>US$/bbl</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.cme, marginTop: 4 }}>{fmtNum(y.netbackAudGj, 2)}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.brent, marginTop: 4 }}>{fmtNum(y.netbackAudGj, 2)}</div>
                 <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>A$/GJ netback</div>
               </div>
             ))}
@@ -702,50 +824,6 @@ export default function TabLNGPrices() {
           { color: COLORS.audAvg, label: '5-day average (used in the netback calculation)', opacity: 0.7 },
         ]} />
       </ChartCard>
-
-      {/* Chart 4: Netback price at Wallumbilla */}
-      <ChartCard
-        id="chart-lng-wallumbilla-netback"
-        title="Netback Price at Wallumbilla"
-        subtitle="A$/GJ — short-term JKM-based netback, medium-term Year-1 Brent-based netback, and the actual Wallumbilla GSH spot price"
-        onExportPPT={() => handleExportPPT('chart-lng-wallumbilla-netback', 'Netback Price at Wallumbilla')}
-        onExportXLSX={() => handleExportXLSX(netbackChart, 'wallumbilla_netback_prices')}
-      >
-        <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={netbackChart} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
-            <CartesianGrid {...GRID_STYLE} />
-            <XAxis dataKey="month" tickFormatter={monthLabel} interval={monthTickInterval(netbackChart.length)} {...AXIS_STYLE} />
-            <YAxis {...AXIS_STYLE} tickFormatter={v => v.toFixed(0)} />
-            <Tooltip content={<CustomTooltip formatter={(v, name) => `${Number(v).toFixed(2)} A$/GJ`} labelFormatter={monthLabelLong} />} />
-            {netbackForwardStartMonth && <ReferenceLine x={netbackForwardStartMonth} stroke="var(--border)" strokeDasharray="3 3" />}
-            {brentBackfill && <ReferenceLine x={brentBackfill.meta.cutoffMonth} stroke={COLORS.brentSpot} strokeDasharray="2 2" strokeOpacity={0.5} />}
-            <Line type="monotone" dataKey="jkmHistorical" name="JKM netback (historical)" stroke={COLORS.jkmNetback} strokeWidth={2} dot={false} connectNulls />
-            <Line type="monotone" dataKey="jkmForward" name="JKM netback (forward curve)" stroke={COLORS.jkmNetback} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-            <Line type="monotone" dataKey="brentYear1" name="Brent Year-1 netback" stroke={COLORS.brentNetback} strokeWidth={2} dot={false} connectNulls />
-            {brentBackfill && <Line type="monotone" dataKey="brentSpotBackfill" name="Brent netback (spot-based estimate, pre-2022)" stroke={COLORS.brentSpot} strokeWidth={1.5} strokeDasharray="4 2" dot={false} connectNulls />}
-            {cmeJkmResult && <Line type="monotone" dataKey="jkmCme" name="JKM netback (CME-updated)" stroke={COLORS.cme} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
-            {gshBenchmark && <Line type="monotone" dataKey="wallumbillaSpot" name="Wallumbilla GSH spot (actual)" stroke={COLORS.gsh} strokeWidth={2} dot={false} connectNulls />}
-          </ComposedChart>
-        </ResponsiveContainer>
-        <Legend items={[
-          { color: COLORS.jkmNetback, label: 'Short-term JKM netback — historical (solid) / ACCC forward curve (dashed)' },
-          { color: COLORS.brentNetback, label: 'Medium-term Brent Year-1 netback (oil-linked contract proxy)' },
-          ...(brentBackfill ? [{ color: COLORS.brentSpot, label: `Brent netback estimate before ${monthLabelLong(brentBackfill.meta.cutoffMonth)} — spot price × ${brentBackfill.meta.slopePercent}% slope (earliest available), approximate`, opacity: 0.8 }] : []),
-          ...(cmeJkmResult ? [{ color: COLORS.cme, label: 'JKM netback recomputed from CME-updated settlement prices' }] : []),
-          ...(gshBenchmark ? [{ color: COLORS.gsh, label: `Wallumbilla GSH benchmark spot price, actual (monthly avg, since ${gshBenchmark.monthly[0]?.month})` }] : []),
-        ]} />
-        {gshError && !gshBenchmark && (
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-            Wallumbilla spot price unavailable: {gshError}
-          </div>
-        )}
-        {brentSpotError && !brentSpot && (
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-            Brent netback backfill unavailable: {brentSpotError}
-          </div>
-        )}
-      </ChartCard>
-
 
       <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'DM Mono, monospace', lineHeight: 1.6 }}>
         Sources: S&amp;P Global Platts (historical LNG &amp; freight), ICE (LNG &amp; Brent futures via Bloomberg),
