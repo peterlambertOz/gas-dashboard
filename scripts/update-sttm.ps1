@@ -10,6 +10,7 @@ $podData        = "~/apps/gas-dashboard/public/data"
 $forecastsDir   = "C:\Users\peter\Python\data\forecasts"
 $localPublicData = "C:\Users\peter\Python\gas-dashboard\public\data"
 $downloadsDir   = "$env:USERPROFILE\Downloads"
+$dataDir        = "C:\Users\peter\Python\data"
 
 New-Item -ItemType Directory -Force -Path $localPublicData | Out-Null
 
@@ -52,6 +53,33 @@ if (-not $sttmFile) {
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# ── OFX AUD/USD (manually updated from time to time, not auto-downloaded) ───
+$audUsdFile = "USD_per_AUD_from_20150101.xlsx"
+$audUsdSrc  = Join-Path $dataDir $audUsdFile
+if (-not (Test-Path $audUsdSrc)) {
+    Write-Host "OFX AUD/USD: $audUsdFile not found in $dataDir -- skipping (LNG Prices tab will fall back to ACCC FX data)" -ForegroundColor Yellow
+} else {
+    Copy-Item $audUsdSrc (Join-Path $localPublicData $audUsdFile) -Force
+    scp $audUsdSrc "${pod}:${podData}/$audUsdFile"
+    if ($LASTEXITCODE -eq 0) { Write-Host "OFX AUD/USD: $audUsdFile OK (local + pod)" -ForegroundColor Green }
+    else { Write-Host "OFX AUD/USD: $audUsdFile pushed locally but pod scp FAILED" -ForegroundColor Red }
+}
+Write-Host ""
+
+# ── Brent spot price (EIA, manually updated from time to time) ──────────────
+$brentSpotFile = "Europe_Brent_Spot_Price_FOB.csv"
+$brentSpotSrc  = Join-Path $dataDir $brentSpotFile
+if (-not (Test-Path $brentSpotSrc)) {
+    Write-Host "Brent spot (EIA): $brentSpotFile not found in $dataDir -- skipping (Brent netback won't extend before Aug 2022)" -ForegroundColor Yellow
+} else {
+    Copy-Item $brentSpotSrc (Join-Path $localPublicData $brentSpotFile) -Force
+    scp $brentSpotSrc "${pod}:${podData}/$brentSpotFile"
+    if ($LASTEXITCODE -eq 0) { Write-Host "Brent spot (EIA): $brentSpotFile OK (local + pod)" -ForegroundColor Green }
+    else { Write-Host "Brent spot (EIA): $brentSpotFile pushed locally but pod scp FAILED" -ForegroundColor Red }
+}
+Write-Host ""
+
 
 # ── Download AEMO + NEMWEB market data files ──────────────────────────────────
 Write-Host "Downloading market data files..."

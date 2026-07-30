@@ -11,6 +11,7 @@ import TabProduction from './tabs/TabProduction';
 import TabStateBreakdown from './tabs/TabStateBreakdown';
 import TabFlowMap from './tabs/TabFlowMap';
 import TabLNG from './tabs/TabLNG';
+import TabLNGPrices from './tabs/TabLNGPrices';
 import TabGasPrice from './tabs/TabGasPrice';
 import TabForecast from './tabs/TabForecast';
 import TabValidation from './tabs/TabValidation';
@@ -28,6 +29,7 @@ const TABS = [
   { id: 'states',     label: 'State Breakdown' },
   { id: 'flowmap',    label: 'Flow Map' },
   { id: 'lng',        label: 'LNG' },
+  { id: 'lngprices',  label: 'LNG Prices' },
   { id: 'prices',     label: 'Gas Prices' },
 ];
 
@@ -409,7 +411,7 @@ export default function App() {
     if (records.length) exportToExcel(records.filter(r => selectedYears.includes(r.year)));
   };
 
-  const ActiveTab = { demand: TabDailyDemand, validation: TabValidation, forecast: TabForecast, historical: TabHistoricalWeather, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, prices: TabGasPrice }[activeTab];
+  const ActiveTab = { demand: TabDailyDemand, validation: TabValidation, forecast: TabForecast, historical: TabHistoricalWeather, gpg: TabGPG, supply: TabSupplyCapacity, production: TabProduction, storage: TabStorage, states: TabStateBreakdown, flowmap: TabFlowMap, lng: TabLNG, lngprices: TabLNGPrices, prices: TabGasPrice }[activeTab];
   const priceProps      = { sttmData, dwgmWb, dwgmPrices, priceLoaded, priceError, setSttmData, setDwgmWb, setPriceLoaded, setPriceError };
   const forecastProps   = {
     forecastData, forecastPoeData, hourlyData, onLoadForecast: routeFile,
@@ -590,7 +592,7 @@ export default function App() {
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-muted)', fontSize: 12 }}>{loadMsg}</div>
           </div>
-        ) : records.length === 0 && activeTab !== 'prices' && activeTab !== 'forecast' && activeTab !== 'historical' ? (
+        ) : records.length === 0 && activeTab !== 'prices' && activeTab !== 'forecast' && activeTab !== 'historical' && activeTab !== 'lngprices' ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 400, gap: 18, textAlign: 'center' }}>
             <svg viewBox="0 0 385 370" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: 52, height: 52 }}>
               <circle cx="170" cy="186" r="163" fill="#52308B" stroke="#30363d" strokeWidth="14"/>
