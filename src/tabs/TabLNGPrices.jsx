@@ -608,10 +608,10 @@ export default function TabLNGPrices() {
             <Line type="monotone" dataKey="jkmHistorical" name="JKM netback (historical)" stroke={COLORS.jkmNetback} strokeWidth={2} dot={false} connectNulls />
             <Line type="monotone" dataKey="jkmForward" name="JKM netback (forward curve)" stroke={COLORS.jkmNetback} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
             <Line type="monotone" dataKey="brentYear1" name="Brent Year-1 netback" stroke={COLORS.brentNetback} strokeWidth={2} dot={false} connectNulls />
-            <Line type="monotone" dataKey="brentForward" name="Brent Year 1-5 forward netback (ACCC)" stroke={COLORS.brentNetback} strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3 }} connectNulls />
+            <Line type="monotone" dataKey="brentForward" name="Brent Year 1-5 forward netback (ACCC)" stroke={COLORS.brentNetback} strokeWidth={2} strokeDasharray="5 3" dot={{ r: 0.75, fill: COLORS.brentNetback, stroke: 'none' }} connectNulls />
             {brentBackfill && <Line type="monotone" dataKey="brentSpotBackfill" name="Brent netback (spot-based estimate, pre-2022)" stroke={COLORS.brentSpot} strokeWidth={1.5} strokeDasharray="4 2" dot={false} connectNulls />}
-            {cmeJkmResult && <Line type="monotone" dataKey="jkmCme" name="JKM netback (CME-updated)" stroke={COLORS.jkmNetback} strokeWidth={2} dot={{ r: 3 }} connectNulls />}
-            {cmeBrentResult && <Line type="monotone" dataKey="brentCme" name="Brent netback (CME-updated, monthly)" stroke={COLORS.brentNetback} strokeWidth={2} dot={{ r: 3 }} connectNulls />}
+            {cmeJkmResult && <Line type="monotone" dataKey="jkmCme" name="JKM netback (CME-updated)" stroke={COLORS.jkmNetback} strokeWidth={2} dot={{ r: 0.75, fill: COLORS.jkmNetback, stroke: 'none' }} connectNulls />}
+            {cmeBrentResult && <Line type="monotone" dataKey="brentCme" name="Brent netback (CME-updated, monthly)" stroke={COLORS.brentNetback} strokeWidth={2} dot={{ r: 0.75, fill: COLORS.brentNetback, stroke: 'none' }} connectNulls />}
             {gshBenchmark && <Line type="monotone" dataKey="wallumbillaSpot" name="Wallumbilla GSH spot (actual)" stroke={COLORS.gsh} strokeWidth={2} dot={false} connectNulls />}
           </ComposedChart>
         </ResponsiveContainer>
@@ -738,7 +738,7 @@ export default function TabLNGPrices() {
             {jkmForwardStartMonth && <ReferenceLine x={jkmForwardStartMonth} stroke="var(--border)" strokeDasharray="3 3" />}
             <Line type="monotone" dataKey="historical" name="Historical (front-month settlement)" stroke={COLORS.jkm} strokeWidth={2} dot={false} connectNulls />
             <Line type="monotone" dataKey="forward" name="Latest forward curve (ACCC)" stroke={COLORS.jkmForward} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-            {cmeJkmResult && <Line type="monotone" dataKey="cme" name="CME-updated forward curve" stroke={COLORS.jkm} strokeWidth={2} dot={{ r: 3 }} connectNulls />}
+            {cmeJkmResult && <Line type="monotone" dataKey="cme" name="CME-updated forward curve" stroke={COLORS.jkm} strokeWidth={2} dot={{ r: 0.75, fill: COLORS.jkm, stroke: 'none' }} connectNulls />}
           </ComposedChart>
         </ResponsiveContainer>
         <Legend items={[
@@ -764,8 +764,8 @@ export default function TabLNGPrices() {
             <Tooltip content={<CustomTooltip formatter={(v) => `${Number(v).toFixed(2)} US$/bbl`} labelFormatter={monthLabelLong} />} />
             {brentBackfill && <Line type="monotone" dataKey="spotBackfill" name="Brent spot (EIA, pre-2022 context)" stroke={COLORS.brentSpot} strokeWidth={1.5} strokeDasharray="4 2" dot={false} connectNulls />}
             <Line type="monotone" dataKey="value" name="Brent Year 1 futures" stroke={COLORS.brent} strokeWidth={2} dot={false} connectNulls />
-            <Line type="monotone" dataKey="forward" name="ACCC Year 1-5 forward curve" stroke={COLORS.brent} strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3 }} connectNulls />
-            {cmeBrentResult && <Line type="monotone" dataKey="cme" name="CME-updated forward curve (monthly)" stroke={COLORS.brent} strokeWidth={2} dot={{ r: 3 }} connectNulls />}
+            <Line type="monotone" dataKey="forward" name="ACCC Year 1-5 forward curve" stroke={COLORS.brent} strokeWidth={2} strokeDasharray="5 3" dot={{ r: 0.75, fill: COLORS.brent, stroke: 'none' }} connectNulls />
+            {cmeBrentResult && <Line type="monotone" dataKey="cme" name="CME-updated forward curve (monthly)" stroke={COLORS.brent} strokeWidth={2} dot={{ r: 0.75, fill: COLORS.brent, stroke: 'none' }} connectNulls />}
           </LineChart>
         </ResponsiveContainer>
         <Legend items={[
