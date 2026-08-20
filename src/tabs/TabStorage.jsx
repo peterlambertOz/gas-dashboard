@@ -6,13 +6,23 @@ import { useMemo } from 'react';
 import { ChartCard, KpiCard, CustomTooltip, AXIS_STYLE, GRID_STYLE, YEAR_COLORS, Legend, fmtDate } from '../components/ChartCard';
 import { exportToPowerPoint, exportToExcel } from '../utils/exportUtils';
 
+// Fixed historical reference window — independent of which years the user selects.
+// Hist. min / Hist. max / average are always computed from these years only.
+const HIST_FIRST_YEAR = 2019;
+const HIST_LAST_YEAR = 2025;
+const HIST_LABEL = `${HIST_FIRST_YEAR}–${HIST_LAST_YEAR}`;
+const HIST_YEARS = Array.from(
+  { length: HIST_LAST_YEAR - HIST_FIRST_YEAR + 1 },
+  (_, i) => HIST_FIRST_YEAR + i
+);
+
 export default function TabStorage({ records, selectedYears, dateRange }) {
   const latestYear = Math.max(...selectedYears);
 
   // (yoyStorage removed — data is incorporated in storageOverlay below)
 
-  // Historical range uses ALL selected years for shading band
-  const historicalYears = useMemo(() => selectedYears.slice(), [selectedYears]);
+  // Historical range/average uses the fixed HIST_YEARS window, NOT selectedYears
+  const historicalYears = HIST_YEARS;
   const rangeData = useMemo(() => {
     const pivot = {};
     for (const r of records.filter(r => historicalYears.includes(r.year) && r.storage_balance_iona !== null)) {
@@ -103,7 +113,7 @@ export default function TabStorage({ records, selectedYears, dateRange }) {
       <ChartCard
         id="chart-storage-yoy"
         title="Iona Storage Balance — Year-on-Year"
-        subtitle="Running storage balance (TJ) with selected-year range shading and individual year lines"
+        subtitle={`Running storage balance (TJ) with ${HIST_LABEL} range shading and average, plus individual year lines`}
         onExportPPT={() => handleExportPPT('chart-storage-yoy', 'Iona Storage Balance Year-on-Year')}
         onExportXLSX={() => exportToExcel(records.filter(r => r.storage_balance_iona !== null))}
       >
@@ -113,14 +123,14 @@ export default function TabStorage({ records, selectedYears, dateRange }) {
             <XAxis dataKey="day" tickFormatter={dayLabel} ticks={[1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]} {...AXIS_STYLE} />
             <YAxis {...AXIS_STYLE} tickFormatter={v => `${v.toLocaleString()}`} />
             <Tooltip content={<CustomTooltip formatter={(v) => `${Math.round(v).toLocaleString()} TJ`}  labelFormatter={fmtDate} /> } />
-            {/* Historical range shading */}
-            {historicalYears.length > 1 && (
-              <Area dataKey="rangeMax" name="Hist. max" fill="#bc8cff" stroke="none" fillOpacity={0.08} />
+            {/* Historical range shading — fixed 2019–2025 window */}
+            {rangeData.length > 0 && (
+              <Area dataKey="rangeMax" name={`Hist. max (${HIST_LABEL})`} fill="#bc8cff" stroke="none" fillOpacity={0.08} />
             )}
-            {historicalYears.length > 1 && (
-              <Area dataKey="rangeMin" name="Hist. min" fill="#bc8cff" stroke="none" fillOpacity={0.08} />
+            {rangeData.length > 0 && (
+              <Area dataKey="rangeMin" name={`Hist. min (${HIST_LABEL})`} fill="#bc8cff" stroke="none" fillOpacity={0.08} />
             )}
-            <Line type="monotone" dataKey="rangeMid" name="2019–2023 avg" stroke="#bc8cff" strokeWidth={1.5} strokeDasharray="5 3" dot={false} />
+            <Line type="monotone" dataKey="rangeMid" name={`${HIST_LABEL} avg`} stroke="#bc8cff" strokeWidth={1.5} strokeDasharray="5 3" dot={false} connectNulls />
             {/* Recent years */}
             {selectedYears.map(y => (
               <Line key={y} type="monotone" dataKey={y} name={String(y)}
@@ -129,7 +139,7 @@ export default function TabStorage({ records, selectedYears, dateRange }) {
           </ComposedChart>
         </ResponsiveContainer>
         <Legend items={[
-          { color: '#bc8cff', label: 'Selected year range & average' },
+          { color: '#bc8cff', label: `${HIST_LABEL} range & average` },
           ...selectedYears.map(y => ({ color: YEAR_COLORS[y] || '#888', label: String(y) }))
         ]} />
       </ChartCard>
